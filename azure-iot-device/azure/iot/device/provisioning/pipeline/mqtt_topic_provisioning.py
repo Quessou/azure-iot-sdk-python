@@ -24,24 +24,24 @@ def get_register_topic_for_subscribe():
     return _get_topic_base() + "res/#"
 
 
-def get_register_topic_for_publish(request_id):
+def get_register_topic_for_publish(method, request_id):
     """
     return the topic string used to publish telemetry
     """
-    return (_get_topic_base() + "PUT/iotdps-register/?$rid={request_id}").format(
-        request_id=request_id
+    return (_get_topic_base() + "{method}/iotdps-register/?$rid={request_id}").format(
+        method=method, request_id=request_id
     )
 
 
-def get_query_topic_for_publish(request_id, operation_id):
+def get_query_topic_for_publish(method, request_id, operation_id):
     """
     :return: The topic for cloud to device messages.It is of the format
     "devices/<deviceid>/messages/devicebound/#"
     """
     return (
         _get_topic_base()
-        + "GET/iotdps-get-operationstatus/?$rid={request_id}&operationId={operation_id}"
-    ).format(request_id=request_id, operation_id=operation_id)
+        + "{method}/iotdps-get-operationstatus/?$rid={request_id}&operationId={operation_id}"
+    ).format(method=method, request_id=request_id, operation_id=operation_id)
 
 
 # TODO: Should this even exist? It's only used here
@@ -94,3 +94,22 @@ def extract_status_code_from_topic(topic):
     url_parts = topic_parts[1].split("/")
     status_code = url_parts[POS_STATUS_CODE_IN_TOPIC]
     return status_code
+
+
+def get_optional_element(content, element_name, index=0):
+    """
+    Gets an optional element from json string , or dictionary.
+    :param content: The content from which the element needs to be retrieved.
+    :param element_name: The name of the element
+    :param index: Optional index in case the return is a collection of elements.
+    """
+    element = None if element_name not in content else content[element_name]
+    if element is None:
+        return None
+    else:
+        if isinstance(element, list):
+            return element[index]
+        elif isinstance(element, object):
+            return element
+        else:
+            return str(element)

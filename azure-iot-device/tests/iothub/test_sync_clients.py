@@ -13,24 +13,25 @@ import io
 import six
 from azure.iot.device.iothub import IoTHubDeviceClient, IoTHubModuleClient
 from azure.iot.device import exceptions as client_exceptions
-from azure.iot.device.iothub.pipeline import IoTHubPipeline, constant, config
+from azure.iot.device.iothub.pipeline import MQTTPipeline, constant
 from azure.iot.device.iothub.pipeline import exceptions as pipeline_exceptions
 from azure.iot.device.iothub.models import Message, MethodRequest
 from azure.iot.device.iothub.sync_inbox import SyncClientInbox
 from azure.iot.device.iothub.auth import IoTEdgeError
+from azure.iot.device import constant as device_constant
 
 logging.basicConfig(level=logging.DEBUG)
 
 
-# automatically mock the iothub pipeline for all tests in this file.
+# automatically mock the mqtt pipeline for all tests in this file.
 @pytest.fixture(autouse=True)
-def mock_pipeline_init(mocker):
-    return mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipeline")
+def mock_mqtt_pipeline_init(mocker):
+    return mocker.patch("azure.iot.device.iothub.pipeline.MQTTPipeline")
 
 
 # automatically mock the http pipeline for all tests in this file.
 @pytest.fixture(autouse=True)
-def mock_pipeline_http_init(mocker):
+def mock_http_pipeline_init(mocker):
     return mocker.patch("azure.iot.device.iothub.pipeline.HTTPPipeline")
 
 
@@ -39,212 +40,222 @@ def mock_pipeline_http_init(mocker):
 ################
 class SharedClientInstantiationTests(object):
     @pytest.mark.it(
-        "Stores the IoTHubPipeline from the 'iothub_pipeline' parameter in the '_iothub_pipeline' attribute"
+        "Stores the MQTTPipeline from the 'mqtt_pipeline' parameter in the '_mqtt_pipeline' attribute"
     )
-    def test_iothub_pipeline_attribute(self, client_class, iothub_pipeline, http_pipeline):
-        client = client_class(iothub_pipeline, http_pipeline)
+    def test_mqtt_pipeline_attribute(self, client_class, mqtt_pipeline, http_pipeline):
+        client = client_class(mqtt_pipeline, http_pipeline)
 
-        assert client._iothub_pipeline is iothub_pipeline
+        assert client._mqtt_pipeline is mqtt_pipeline
 
     @pytest.mark.it(
         "Stores the HTTPPipeline from the 'http_pipeline' parameter in the '_http_pipeline' attribute"
     )
-    def test_sets_http_pipeline_attribute(self, client_class, iothub_pipeline, http_pipeline):
-        client = client_class(iothub_pipeline, http_pipeline)
+    def test_sets_http_pipeline_attribute(self, client_class, mqtt_pipeline, http_pipeline):
+        client = client_class(mqtt_pipeline, http_pipeline)
 
         assert client._http_pipeline is http_pipeline
 
-    @pytest.mark.it("Sets on_connected handler in the IoTHubPipeline")
+    @pytest.mark.it("Sets on_connected handler in the MQTTPipeline")
     def test_sets_on_connected_handler_in_pipeline(
-        self, client_class, iothub_pipeline, http_pipeline
+        self, client_class, mqtt_pipeline, http_pipeline
     ):
-        client = client_class(iothub_pipeline, http_pipeline)
+        client = client_class(mqtt_pipeline, http_pipeline)
 
-        assert client._iothub_pipeline.on_connected is not None
-        assert client._iothub_pipeline.on_connected == client._on_connected
+        assert client._mqtt_pipeline.on_connected is not None
+        assert client._mqtt_pipeline.on_connected == client._on_connected
 
-    @pytest.mark.it("Sets on_disconnected handler in the IoTHubPipeline")
+    @pytest.mark.it("Sets on_disconnected handler in the MQTTPipeline")
     def test_sets_on_disconnected_handler_in_pipeline(
-        self, client_class, iothub_pipeline, http_pipeline
+        self, client_class, mqtt_pipeline, http_pipeline
     ):
-        client = client_class(iothub_pipeline, http_pipeline)
+        client = client_class(mqtt_pipeline, http_pipeline)
 
-        assert client._iothub_pipeline.on_disconnected is not None
-        assert client._iothub_pipeline.on_disconnected == client._on_disconnected
+        assert client._mqtt_pipeline.on_disconnected is not None
+        assert client._mqtt_pipeline.on_disconnected == client._on_disconnected
 
-    @pytest.mark.it("Sets on_method_request_received handler in the IoTHubPipeline")
+    @pytest.mark.it("Sets on_method_request_received handler in the MQTTPipeline")
     def test_sets_on_method_request_received_handler_in_pipleline(
-        self, client_class, iothub_pipeline, http_pipeline
+        self, client_class, mqtt_pipeline, http_pipeline
     ):
-        client = client_class(iothub_pipeline, http_pipeline)
+        client = client_class(mqtt_pipeline, http_pipeline)
 
-        assert client._iothub_pipeline.on_method_request_received is not None
+        assert client._mqtt_pipeline.on_method_request_received is not None
         assert (
-            client._iothub_pipeline.on_method_request_received
+            client._mqtt_pipeline.on_method_request_received
             == client._inbox_manager.route_method_request
         )
 
 
-class ConfigurationSharedClientCreateFromConnectionStringTests(object):
-    @pytest.mark.it("Sets all configuration options to default when no user configuration provided")
-    def test_pipeline_configuration_defaults(
-        self, mocker, mock_pipeline_init, client_class, connection_string
-    ):
-        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
+class SharedClientCreateMethodUserOptionTests(object):
+    # In these tests we patch the entire 'auth' library instead of specific auth providers in order
+    # to make them more generic, and applicable across all creation methods.
 
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig",
-            wraps=config.IoTHubPipelineConfig,
-        )
+    @pytest.fixture
+    def option_test_required_patching(self, mocker):
+        """Override this fixture in a subclass if unique patching is required"""
+        pass
 
-        args = (connection_string,)
-        client_class.create_from_connection_string(*args)
-
-        assert mock_config_init.call_count == 1
-        assert mock_config_init.call_args == mocker.call()
-        assert mock_pipeline_init.call_args[0][1].websockets is False
-        assert mock_pipeline_init.call_args[0][1].product_info == ""
-
-    @pytest.mark.it("Sets all valid configuration options to the user supplied values")
-    @pytest.mark.parametrize(
-        "websockets, product_info",
-        [
-            pytest.param((None, None), (None, None), id=" Setting to None"),
-            pytest.param(
-                (True, True),
-                ("__fake_product_info__", "__fake_product_info__"),
-                id=" Expected Values",
-            ),
-        ],
+    @pytest.mark.it(
+        "Sets the 'product_info' user option parameter on the PipelineConfig, if provided"
     )
-    def test_pipeline_configuration(
-        self, mocker, mock_pipeline_init, client_class, connection_string, websockets, product_info
+    def test_product_info_option(
+        self,
+        option_test_required_patching,
+        client_create_method,
+        create_method_args,
+        mock_mqtt_pipeline_init,
+        mock_http_pipeline_init,
     ):
-        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
 
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig",
-            wraps=config.IoTHubPipelineConfig,
-        )
+        product_info = "MyProductInfo"
+        client_create_method(*create_method_args, product_info=product_info)
 
-        args = (connection_string,)
-        kwargs = {"websockets": websockets[0], "product_info": product_info[0]}
+        # Get configuration object, and ensure it was used for both protocol pipelines
+        assert mock_mqtt_pipeline_init.call_count == 1
+        config = mock_mqtt_pipeline_init.call_args[0][1]
+        assert config == mock_http_pipeline_init.call_args[0][1]
 
-        client_class.create_from_connection_string(*args, **kwargs)
-        assert mock_config_init.call_count == 1
-        assert mock_config_init.call_args == mocker.call(
-            websockets=websockets[0], product_info=product_info[0]
-        )
-        assert mock_pipeline_init.call_args[0][1].websockets == websockets[1]
-        assert mock_pipeline_init.call_args[0][1].product_info == product_info[1]
+        assert config.product_info == product_info
 
-    @pytest.mark.it("Throws if invalid configuration option is provided")
-    def test_pipeline_configuration_fails_with_bad_option(
-        self, mocker, mock_pipeline_init, client_class, connection_string
+    @pytest.mark.it(
+        "Sets the 'websockets' user option parameter on the PipelineConfig, if provided"
+    )
+    def test_websockets_option(
+        self,
+        option_test_required_patching,
+        client_create_method,
+        create_method_args,
+        mock_mqtt_pipeline_init,
+        mock_http_pipeline_init,
     ):
-        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
 
-        args = (connection_string,)
-        kwargs = {"bad_option": "__fake_parameter__"}
+        client_create_method(*create_method_args, websockets=True)
 
+        # Get configuration object, and ensure it was used for both protocol pipelines
+        assert mock_mqtt_pipeline_init.call_count == 1
+        config = mock_mqtt_pipeline_init.call_args[0][1]
+        assert config == mock_http_pipeline_init.call_args[0][1]
+
+        assert config.websockets
+
+    # TODO: Show that input in the wrong format is formatted to the correct one. This test exists
+    # in the IoTHubPipelineConfig object already, but we do not currently show that this is felt
+    # from the API level.
+    @pytest.mark.it("Sets the 'cipher' user option parameter on the PipelineConfig, if provided")
+    def test_cipher_option(
+        self,
+        option_test_required_patching,
+        client_create_method,
+        create_method_args,
+        mock_mqtt_pipeline_init,
+        mock_http_pipeline_init,
+    ):
+        cipher = "DHE-RSA-AES128-SHA:DHE-RSA-AES256-SHA:ECDHE-ECDSA-AES128-GCM-SHA256"
+        client_create_method(*create_method_args, cipher=cipher)
+
+        # Get configuration object, and ensure it was used for both protocol pipelines
+        assert mock_mqtt_pipeline_init.call_count == 1
+        config = mock_mqtt_pipeline_init.call_args[0][1]
+        assert config == mock_http_pipeline_init.call_args[0][1]
+
+        assert config.cipher == cipher
+
+    @pytest.mark.it(
+        "Sets the 'server_verification_cert' user option parameter on the AuthenticationProvider, if provided"
+    )
+    def test_server_verification_cert_option(
+        self,
+        option_test_required_patching,
+        client_create_method,
+        create_method_args,
+        mock_mqtt_pipeline_init,
+        mock_http_pipeline_init,
+    ):
+        server_verification_cert = "fake_server_verification_cert"
+        client_create_method(*create_method_args, server_verification_cert=server_verification_cert)
+
+        # Get auth provider object, and ensure it was used for both protocol pipelines
+        auth = mock_mqtt_pipeline_init.call_args[0][0]
+        assert auth == mock_http_pipeline_init.call_args[0][0]
+
+        assert auth.server_verification_cert == server_verification_cert
+
+    @pytest.mark.it("Raises a TypeError if an invalid user option parameter is provided")
+    def test_invalid_option(
+        self, option_test_required_patching, client_create_method, create_method_args
+    ):
         with pytest.raises(TypeError):
-            client_class.create_from_connection_string(*args, **kwargs)
+            client_create_method(*create_method_args, invalid_option="some_value")
+
+    @pytest.mark.it("Sets default user options if none are provided")
+    def test_default_options(
+        self,
+        option_test_required_patching,
+        client_create_method,
+        create_method_args,
+        mock_mqtt_pipeline_init,
+        mock_http_pipeline_init,
+    ):
+        client_create_method(*create_method_args)
+
+        # Get configuration object, and ensure it was used for both protocol pipelines
+        assert mock_mqtt_pipeline_init.call_count == 1
+        config = mock_mqtt_pipeline_init.call_args[0][1]
+        assert config == mock_http_pipeline_init.call_args[0][1]
+
+        # Get auth provider object, and ensure it was used for both protocol pipelines
+        auth = mock_mqtt_pipeline_init.call_args[0][0]
+        assert auth == mock_http_pipeline_init.call_args[0][0]
+
+        assert config.product_info == ""
+        assert not config.websockets
+        assert not config.cipher
+        assert auth.server_verification_cert is None
 
 
 class SharedClientCreateFromConnectionStringTests(object):
-    @pytest.mark.it(
-        "Uses the connection string and server verification certificate combination to create a SymmetricKeyAuthenticationProvider"
-    )
-    @pytest.mark.parametrize(
-        "server_verification_cert",
-        [
-            pytest.param(None, id=" No Server Verification Certificate"),
-            pytest.param("some-certificate", id=" With Server Verification Certificate"),
-        ],
-    )
-    def test_auth_provider_creation(
-        self, mocker, client_class, connection_string, server_verification_cert
-    ):
+    @pytest.mark.it("Uses the connection string to create a SymmetricKeyAuthenticationProvider")
+    def test_auth_provider_creation(self, mocker, client_class, connection_string):
         mock_auth_parse = mocker.patch(
             "azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider"
         ).parse
 
-        args = (connection_string,)
-        kwargs = {}
-        if server_verification_cert:
-            kwargs["server_verification_cert"] = server_verification_cert
-        client_class.create_from_connection_string(*args, **kwargs)
+        client_class.create_from_connection_string(connection_string)
 
         assert mock_auth_parse.call_count == 1
         assert mock_auth_parse.call_args == mocker.call(connection_string)
-        assert mock_auth_parse.return_value.server_verification_cert is server_verification_cert
 
-    @pytest.mark.it("Uses the SymmetricKeyAuthenticationProvider to create an IoTHubPipeline")
-    @pytest.mark.parametrize(
-        "server_verification_cert",
-        [
-            pytest.param(None, id=" No Server Verification Certificate"),
-            pytest.param("some-certificate", id=" With Server Verification Certificate"),
-        ],
-    )
+    @pytest.mark.it("Uses the SymmetricKeyAuthenticationProvider to create an MQTTPipeline")
     def test_pipeline_creation(
-        self, mocker, client_class, connection_string, server_verification_cert, mock_pipeline_init
+        self, mocker, client_class, connection_string, mock_mqtt_pipeline_init
     ):
         mock_auth = mocker.patch(
             "azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider"
         ).parse.return_value
 
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig"
+        mock_config_init = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipelineConfig")
+
+        client_class.create_from_connection_string(connection_string)
+
+        assert mock_mqtt_pipeline_init.call_count == 1
+        assert mock_mqtt_pipeline_init.call_args == mocker.call(
+            mock_auth, mock_config_init.return_value
         )
 
-        args = (connection_string,)
-        kwargs = {}
-        if server_verification_cert:
-            kwargs["server_verification_cert"] = server_verification_cert
-        client_class.create_from_connection_string(*args, **kwargs)
-
-        assert mock_pipeline_init.call_count == 1
-        assert mock_pipeline_init.call_args == mocker.call(mock_auth, mock_config_init.return_value)
-
-    @pytest.mark.it("Uses the IoTHubPipeline to instantiate the client")
-    @pytest.mark.parametrize(
-        "server_verification_cert",
-        [
-            pytest.param(None, id=" No Server Verification Certificate"),
-            pytest.param("some-certificate", id=" With Server Verification Certificate"),
-        ],
-    )
-    def test_client_instantiation(
-        self, mocker, client_class, connection_string, server_verification_cert
-    ):
-        mock_pipeline = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipeline").return_value
+    @pytest.mark.it("Uses the MQTTPipeline to instantiate the client")
+    def test_client_instantiation(self, mocker, client_class, connection_string):
+        mock_pipeline = mocker.patch("azure.iot.device.iothub.pipeline.MQTTPipeline").return_value
         mock_pipeline_http = mocker.patch(
             "azure.iot.device.iothub.pipeline.HTTPPipeline"
         ).return_value
         spy_init = mocker.spy(client_class, "__init__")
-        args = (connection_string,)
-        kwargs = {}
-        if server_verification_cert:
-            kwargs["server_verification_cert"] = server_verification_cert
-        client_class.create_from_connection_string(*args, **kwargs)
+        client_class.create_from_connection_string(connection_string)
         assert spy_init.call_count == 1
         assert spy_init.call_args == mocker.call(mocker.ANY, mock_pipeline, mock_pipeline_http)
 
     @pytest.mark.it("Returns the instantiated client")
-    @pytest.mark.parametrize(
-        "server_verification_cert",
-        [
-            pytest.param(None, id=" No Server Verification Certificate"),
-            pytest.param("some-certificate", id=" With Server Verification Certificate"),
-        ],
-    )
-    def test_returns_client(self, client_class, connection_string, server_verification_cert):
-        args = (connection_string,)
-        kwargs = {}
-        if server_verification_cert:
-            kwargs["server_verification_cert"] = server_verification_cert
-        client = client_class.create_from_connection_string(*args, **kwargs)
+    def test_returns_client(self, client_class, connection_string):
+        client = client_class.create_from_connection_string(connection_string)
 
         assert isinstance(client, client_class)
 
@@ -294,16 +305,16 @@ class WaitsForEventCompletion(object):
 
 class SharedClientConnectTests(WaitsForEventCompletion):
     @pytest.mark.it("Begins a 'connect' pipeline operation")
-    def test_calls_pipeline_connect(self, client, iothub_pipeline):
+    def test_calls_pipeline_connect(self, client, mqtt_pipeline):
         client.connect()
-        assert iothub_pipeline.connect.call_count == 1
+        assert mqtt_pipeline.connect.call_count == 1
 
     @pytest.mark.it("Waits for the completion of the 'connect' pipeline operation before returning")
     def test_waits_for_pipeline_op_completion(
-        self, mocker, client_manual_cb, iothub_pipeline_manual_cb
+        self, mocker, client_manual_cb, mqtt_pipeline_manual_cb
     ):
         self.add_event_completion_checks(
-            mocker=mocker, pipeline_function=iothub_pipeline_manual_cb.connect
+            mocker=mocker, pipeline_function=mqtt_pipeline_manual_cb.connect
         )
         client_manual_cb.connect()
 
@@ -333,16 +344,26 @@ class SharedClientConnectTests(WaitsForEventCompletion):
                 client_exceptions.ClientError,
                 id="ProtocolClientError->ClientError",
             ),
+            pytest.param(
+                pipeline_exceptions.TlsExchangeAuthError,
+                client_exceptions.ClientError,
+                id="TlsExchangeAuthError->ClientError",
+            ),
+            pytest.param(
+                pipeline_exceptions.ProtocolProxyError,
+                client_exceptions.ClientError,
+                id="ProtocolProxyError->ClientError",
+            ),
             pytest.param(Exception, client_exceptions.ClientError, id="Exception->ClientError"),
         ],
     )
     def test_raises_error_on_pipeline_op_error(
-        self, mocker, client_manual_cb, iothub_pipeline_manual_cb, pipeline_error, client_error
+        self, mocker, client_manual_cb, mqtt_pipeline_manual_cb, pipeline_error, client_error
     ):
         my_pipeline_error = pipeline_error()
         self.add_event_completion_checks(
             mocker=mocker,
-            pipeline_function=iothub_pipeline_manual_cb.connect,
+            pipeline_function=mqtt_pipeline_manual_cb.connect,
             kwargs={"error": my_pipeline_error},
         )
         with pytest.raises(client_error) as e_info:
@@ -352,18 +373,18 @@ class SharedClientConnectTests(WaitsForEventCompletion):
 
 class SharedClientDisconnectTests(WaitsForEventCompletion):
     @pytest.mark.it("Begins a 'disconnect' pipeline operation")
-    def test_calls_pipeline_disconnect(self, client, iothub_pipeline):
+    def test_calls_pipeline_disconnect(self, client, mqtt_pipeline):
         client.disconnect()
-        assert iothub_pipeline.disconnect.call_count == 1
+        assert mqtt_pipeline.disconnect.call_count == 1
 
     @pytest.mark.it(
         "Waits for the completion of the 'disconnect' pipeline operation before returning"
     )
     def test_waits_for_pipeline_op_completion(
-        self, mocker, client_manual_cb, iothub_pipeline_manual_cb
+        self, mocker, client_manual_cb, mqtt_pipeline_manual_cb
     ):
         self.add_event_completion_checks(
-            mocker=mocker, pipeline_function=iothub_pipeline_manual_cb.disconnect
+            mocker=mocker, pipeline_function=mqtt_pipeline_manual_cb.disconnect
         )
         client_manual_cb.disconnect()
 
@@ -382,12 +403,12 @@ class SharedClientDisconnectTests(WaitsForEventCompletion):
         ],
     )
     def test_raises_error_on_pipeline_op_error(
-        self, mocker, client_manual_cb, iothub_pipeline_manual_cb, pipeline_error, client_error
+        self, mocker, client_manual_cb, mqtt_pipeline_manual_cb, pipeline_error, client_error
     ):
         my_pipeline_error = pipeline_error()
         self.add_event_completion_checks(
             mocker=mocker,
-            pipeline_function=iothub_pipeline_manual_cb.disconnect,
+            pipeline_function=mqtt_pipeline_manual_cb.disconnect,
             kwargs={"error": my_pipeline_error},
         )
         with pytest.raises(client_error) as e_info:
@@ -404,20 +425,20 @@ class SharedClientDisconnectEventTests(object):
 
 
 class SharedClientSendD2CMessageTests(WaitsForEventCompletion):
-    @pytest.mark.it("Begins a 'send_message' IoTHubPipeline operation")
-    def test_calls_pipeline_send_message(self, client, iothub_pipeline, message):
+    @pytest.mark.it("Begins a 'send_message' MQTTPipeline operation")
+    def test_calls_pipeline_send_message(self, client, mqtt_pipeline, message):
         client.send_message(message)
-        assert iothub_pipeline.send_message.call_count == 1
-        assert iothub_pipeline.send_message.call_args[0][0] is message
+        assert mqtt_pipeline.send_message.call_count == 1
+        assert mqtt_pipeline.send_message.call_args[0][0] is message
 
     @pytest.mark.it(
         "Waits for the completion of the 'send_message' pipeline operation before returning"
     )
     def test_waits_for_pipeline_op_completion(
-        self, mocker, client_manual_cb, iothub_pipeline_manual_cb, message
+        self, mocker, client_manual_cb, mqtt_pipeline_manual_cb, message
     ):
         self.add_event_completion_checks(
-            mocker=mocker, pipeline_function=iothub_pipeline_manual_cb.send_message
+            mocker=mocker, pipeline_function=mqtt_pipeline_manual_cb.send_message
         )
         client_manual_cb.send_message(message)
 
@@ -454,7 +475,7 @@ class SharedClientSendD2CMessageTests(WaitsForEventCompletion):
         self,
         mocker,
         client_manual_cb,
-        iothub_pipeline_manual_cb,
+        mqtt_pipeline_manual_cb,
         message,
         pipeline_error,
         client_error,
@@ -462,7 +483,7 @@ class SharedClientSendD2CMessageTests(WaitsForEventCompletion):
         my_pipeline_error = pipeline_error()
         self.add_event_completion_checks(
             mocker=mocker,
-            pipeline_function=iothub_pipeline_manual_cb.send_message,
+            pipeline_function=mqtt_pipeline_manual_cb.send_message,
             kwargs={"error": my_pipeline_error},
         )
         with pytest.raises(client_error) as e_info:
@@ -484,13 +505,49 @@ class SharedClientSendD2CMessageTests(WaitsForEventCompletion):
         ],
     )
     def test_wraps_data_in_message_and_calls_pipeline_send_message(
-        self, client, iothub_pipeline, message_input
+        self, client, mqtt_pipeline, message_input
     ):
         client.send_message(message_input)
-        assert iothub_pipeline.send_message.call_count == 1
-        sent_message = iothub_pipeline.send_message.call_args[0][0]
+        assert mqtt_pipeline.send_message.call_count == 1
+        sent_message = mqtt_pipeline.send_message.call_args[0][0]
         assert isinstance(sent_message, Message)
         assert sent_message.data == message_input
+
+    @pytest.mark.it("Raises error when message data size is greater than 256 KB")
+    def test_raises_error_when_message_data_greater_than_256(self, client, mqtt_pipeline):
+        data_input = "serpensortia" * 25600
+        message = Message(data_input)
+        with pytest.raises(ValueError) as e_info:
+            client.send_message(message)
+        assert "256 KB" in e_info.value.args[0]
+        assert mqtt_pipeline.send_message.call_count == 0
+
+    @pytest.mark.it("Raises error when message size is greater than 256 KB")
+    def test_raises_error_when_message_size_greater_than_256(self, client, mqtt_pipeline):
+        data_input = "serpensortia"
+        message = Message(data_input)
+        message.custom_properties["spell"] = data_input * 25600
+        with pytest.raises(ValueError) as e_info:
+            client.send_message(message)
+        assert "256 KB" in e_info.value.args[0]
+        assert mqtt_pipeline.send_message.call_count == 0
+
+    @pytest.mark.it("Does not raises error when message data size is equal to 256 KB")
+    def test_raises_error_when_message_data_equal_to_256(self, client, mqtt_pipeline):
+        data_input = "a" * 262095
+        message = Message(data_input)
+        # This check was put as message class may undergo the default content type encoding change
+        # and the above calculation will change.
+        # Had to do greater than check for python 2. Ideally should be not equal check
+        if message.get_size() > device_constant.TELEMETRY_MESSAGE_SIZE_LIMIT:
+            assert False
+
+        client.send_message(message)
+
+        assert mqtt_pipeline.send_message.call_count == 1
+        sent_message = mqtt_pipeline.send_message.call_args[0][0]
+        assert isinstance(sent_message, Message)
+        assert sent_message.data == data_input
 
 
 class SharedClientReceiveMethodRequestTests(object):
@@ -500,26 +557,26 @@ class SharedClientReceiveMethodRequestTests(object):
         [pytest.param(None, id="Generic Method"), pytest.param("method_x", id="Named Method")],
     )
     def test_enables_methods_only_if_not_already_enabled(
-        self, mocker, client, iothub_pipeline, method_name
+        self, mocker, client, mqtt_pipeline, method_name
     ):
         mocker.patch.object(SyncClientInbox, "get")  # patch this receive_method_request won't block
 
         # Verify Input Messaging enabled if not enabled
-        iothub_pipeline.feature_enabled.__getitem__.return_value = (
+        mqtt_pipeline.feature_enabled.__getitem__.return_value = (
             False
         )  # Method Requests will appear disabled
         client.receive_method_request(method_name)
-        assert iothub_pipeline.enable_feature.call_count == 1
-        assert iothub_pipeline.enable_feature.call_args[0][0] == constant.METHODS
+        assert mqtt_pipeline.enable_feature.call_count == 1
+        assert mqtt_pipeline.enable_feature.call_args[0][0] == constant.METHODS
 
-        iothub_pipeline.enable_feature.reset_mock()
+        mqtt_pipeline.enable_feature.reset_mock()
 
         # Verify Input Messaging not enabled if already enabled
-        iothub_pipeline.feature_enabled.__getitem__.return_value = (
+        mqtt_pipeline.feature_enabled.__getitem__.return_value = (
             True
         )  # Input Messages will appear enabled
         client.receive_method_request(method_name)
-        assert iothub_pipeline.enable_feature.call_count == 0
+        assert mqtt_pipeline.enable_feature.call_count == 0
 
     @pytest.mark.it(
         "Returns a MethodRequest from the generic method inbox, if available, when called without method name"
@@ -655,20 +712,20 @@ class SharedClientReceiveMethodRequestTests(object):
 
 class SharedClientSendMethodResponseTests(WaitsForEventCompletion):
     @pytest.mark.it("Begins a 'send_method_response' pipeline operation")
-    def test_send_method_response_calls_pipeline(self, client, iothub_pipeline, method_response):
+    def test_send_method_response_calls_pipeline(self, client, mqtt_pipeline, method_response):
 
         client.send_method_response(method_response)
-        assert iothub_pipeline.send_method_response.call_count == 1
-        assert iothub_pipeline.send_method_response.call_args[0][0] is method_response
+        assert mqtt_pipeline.send_method_response.call_count == 1
+        assert mqtt_pipeline.send_method_response.call_args[0][0] is method_response
 
     @pytest.mark.it(
         "Waits for the completion of the 'send_method_response' pipeline operation before returning"
     )
     def test_waits_for_pipeline_op_completion(
-        self, mocker, client_manual_cb, iothub_pipeline_manual_cb, method_response
+        self, mocker, client_manual_cb, mqtt_pipeline_manual_cb, method_response
     ):
         self.add_event_completion_checks(
-            mocker=mocker, pipeline_function=iothub_pipeline_manual_cb.send_method_response
+            mocker=mocker, pipeline_function=mqtt_pipeline_manual_cb.send_method_response
         )
         client_manual_cb.send_method_response(method_response)
 
@@ -705,7 +762,7 @@ class SharedClientSendMethodResponseTests(WaitsForEventCompletion):
         self,
         mocker,
         client_manual_cb,
-        iothub_pipeline_manual_cb,
+        mqtt_pipeline_manual_cb,
         method_response,
         pipeline_error,
         client_error,
@@ -713,7 +770,7 @@ class SharedClientSendMethodResponseTests(WaitsForEventCompletion):
         my_pipeline_error = pipeline_error()
         self.add_event_completion_checks(
             mocker=mocker,
-            pipeline_function=iothub_pipeline_manual_cb.send_method_response,
+            pipeline_function=mqtt_pipeline_manual_cb.send_method_response,
             kwargs={"error": my_pipeline_error},
         )
         with pytest.raises(client_error) as e_info:
@@ -723,45 +780,43 @@ class SharedClientSendMethodResponseTests(WaitsForEventCompletion):
 
 class SharedClientGetTwinTests(WaitsForEventCompletion):
     @pytest.fixture
-    def patch_get_twin_to_return_fake_twin(self, fake_twin, mocker, iothub_pipeline):
+    def patch_get_twin_to_return_fake_twin(self, fake_twin, mocker, mqtt_pipeline):
         def immediate_callback(callback):
             callback(twin=fake_twin)
 
-        mocker.patch.object(iothub_pipeline, "get_twin", side_effect=immediate_callback)
+        mocker.patch.object(mqtt_pipeline, "get_twin", side_effect=immediate_callback)
 
     @pytest.mark.it("Implicitly enables twin messaging feature if not already enabled")
     def test_enables_twin_only_if_not_already_enabled(
-        self, mocker, client, iothub_pipeline, patch_get_twin_to_return_fake_twin, fake_twin
+        self, mocker, client, mqtt_pipeline, patch_get_twin_to_return_fake_twin, fake_twin
     ):
         # Verify twin enabled if not enabled
-        iothub_pipeline.feature_enabled.__getitem__.return_value = (
-            False
-        )  # twin will appear disabled
+        mqtt_pipeline.feature_enabled.__getitem__.return_value = False  # twin will appear disabled
         client.get_twin()
-        assert iothub_pipeline.enable_feature.call_count == 1
-        assert iothub_pipeline.enable_feature.call_args[0][0] == constant.TWIN
+        assert mqtt_pipeline.enable_feature.call_count == 1
+        assert mqtt_pipeline.enable_feature.call_args[0][0] == constant.TWIN
 
-        iothub_pipeline.enable_feature.reset_mock()
+        mqtt_pipeline.enable_feature.reset_mock()
 
         # Verify twin not enabled if already enabled
-        iothub_pipeline.feature_enabled.__getitem__.return_value = True  # twin will appear enabled
+        mqtt_pipeline.feature_enabled.__getitem__.return_value = True  # twin will appear enabled
         client.get_twin()
-        assert iothub_pipeline.enable_feature.call_count == 0
+        assert mqtt_pipeline.enable_feature.call_count == 0
 
     @pytest.mark.it("Begins a 'get_twin' pipeline operation")
-    def test_get_twin_calls_pipeline(self, client, iothub_pipeline):
+    def test_get_twin_calls_pipeline(self, client, mqtt_pipeline):
         client.get_twin()
-        assert iothub_pipeline.get_twin.call_count == 1
+        assert mqtt_pipeline.get_twin.call_count == 1
 
     @pytest.mark.it(
         "Waits for the completion of the 'get_twin' pipeline operation before returning"
     )
     def test_waits_for_pipeline_op_completion(
-        self, mocker, client_manual_cb, iothub_pipeline_manual_cb, fake_twin
+        self, mocker, client_manual_cb, mqtt_pipeline_manual_cb, fake_twin
     ):
         self.add_event_completion_checks(
             mocker=mocker,
-            pipeline_function=iothub_pipeline_manual_cb.get_twin,
+            pipeline_function=mqtt_pipeline_manual_cb.get_twin,
             kwargs={"twin": fake_twin},
         )
         client_manual_cb.get_twin()
@@ -796,12 +851,12 @@ class SharedClientGetTwinTests(WaitsForEventCompletion):
         ],
     )
     def test_raises_error_on_pipeline_op_error(
-        self, mocker, client_manual_cb, iothub_pipeline_manual_cb, pipeline_error, client_error
+        self, mocker, client_manual_cb, mqtt_pipeline_manual_cb, pipeline_error, client_error
     ):
         my_pipeline_error = pipeline_error()
         self.add_event_completion_checks(
             mocker=mocker,
-            pipeline_function=iothub_pipeline_manual_cb.get_twin,
+            pipeline_function=mqtt_pipeline_manual_cb.get_twin,
             kwargs={"error": my_pipeline_error},
         )
         with pytest.raises(client_error) as e_info:
@@ -810,11 +865,11 @@ class SharedClientGetTwinTests(WaitsForEventCompletion):
 
     @pytest.mark.it("Returns the twin that the pipeline returned")
     def test_verifies_twin_returned(
-        self, mocker, client_manual_cb, iothub_pipeline_manual_cb, fake_twin
+        self, mocker, client_manual_cb, mqtt_pipeline_manual_cb, fake_twin
     ):
         self.add_event_completion_checks(
             mocker=mocker,
-            pipeline_function=iothub_pipeline_manual_cb.get_twin,
+            pipeline_function=mqtt_pipeline_manual_cb.get_twin,
             kwargs={"twin": fake_twin},
         )
         returned_twin = client_manual_cb.get_twin()
@@ -824,39 +879,37 @@ class SharedClientGetTwinTests(WaitsForEventCompletion):
 class SharedClientPatchTwinReportedPropertiesTests(WaitsForEventCompletion):
     @pytest.mark.it("Implicitly enables twin messaging feature if not already enabled")
     def test_enables_twin_only_if_not_already_enabled(
-        self, mocker, client, iothub_pipeline, twin_patch_reported
+        self, mocker, client, mqtt_pipeline, twin_patch_reported
     ):
         # patch this so x_get_twin won't block
         def immediate_callback(patch, callback):
             callback()
 
         mocker.patch.object(
-            iothub_pipeline, "patch_twin_reported_properties", side_effect=immediate_callback
+            mqtt_pipeline, "patch_twin_reported_properties", side_effect=immediate_callback
         )
 
         # Verify twin enabled if not enabled
-        iothub_pipeline.feature_enabled.__getitem__.return_value = (
-            False
-        )  # twin will appear disabled
+        mqtt_pipeline.feature_enabled.__getitem__.return_value = False  # twin will appear disabled
         client.patch_twin_reported_properties(twin_patch_reported)
-        assert iothub_pipeline.enable_feature.call_count == 1
-        assert iothub_pipeline.enable_feature.call_args[0][0] == constant.TWIN
+        assert mqtt_pipeline.enable_feature.call_count == 1
+        assert mqtt_pipeline.enable_feature.call_args[0][0] == constant.TWIN
 
-        iothub_pipeline.enable_feature.reset_mock()
+        mqtt_pipeline.enable_feature.reset_mock()
 
         # Verify twin not enabled if already enabled
-        iothub_pipeline.feature_enabled.__getitem__.return_value = True  # twin will appear enabled
+        mqtt_pipeline.feature_enabled.__getitem__.return_value = True  # twin will appear enabled
         client.patch_twin_reported_properties(twin_patch_reported)
-        assert iothub_pipeline.enable_feature.call_count == 0
+        assert mqtt_pipeline.enable_feature.call_count == 0
 
     @pytest.mark.it("Begins a 'patch_twin_reported_properties' pipeline operation")
     def test_patch_twin_reported_properties_calls_pipeline(
-        self, client, iothub_pipeline, twin_patch_reported
+        self, client, mqtt_pipeline, twin_patch_reported
     ):
         client.patch_twin_reported_properties(twin_patch_reported)
-        assert iothub_pipeline.patch_twin_reported_properties.call_count == 1
+        assert mqtt_pipeline.patch_twin_reported_properties.call_count == 1
         assert (
-            iothub_pipeline.patch_twin_reported_properties.call_args[1]["patch"]
+            mqtt_pipeline.patch_twin_reported_properties.call_args[1]["patch"]
             is twin_patch_reported
         )
 
@@ -864,11 +917,10 @@ class SharedClientPatchTwinReportedPropertiesTests(WaitsForEventCompletion):
         "Waits for the completion of the 'patch_twin_reported_properties' pipeline operation before returning"
     )
     def test_waits_for_pipeline_op_completion(
-        self, mocker, client_manual_cb, iothub_pipeline_manual_cb, twin_patch_reported
+        self, mocker, client_manual_cb, mqtt_pipeline_manual_cb, twin_patch_reported
     ):
         self.add_event_completion_checks(
-            mocker=mocker,
-            pipeline_function=iothub_pipeline_manual_cb.patch_twin_reported_properties,
+            mocker=mocker, pipeline_function=mqtt_pipeline_manual_cb.patch_twin_reported_properties
         )
         client_manual_cb.patch_twin_reported_properties(twin_patch_reported)
 
@@ -905,7 +957,7 @@ class SharedClientPatchTwinReportedPropertiesTests(WaitsForEventCompletion):
         self,
         mocker,
         client_manual_cb,
-        iothub_pipeline_manual_cb,
+        mqtt_pipeline_manual_cb,
         twin_patch_reported,
         pipeline_error,
         client_error,
@@ -913,7 +965,7 @@ class SharedClientPatchTwinReportedPropertiesTests(WaitsForEventCompletion):
         my_pipeline_error = pipeline_error()
         self.add_event_completion_checks(
             mocker=mocker,
-            pipeline_function=iothub_pipeline_manual_cb.patch_twin_reported_properties,
+            pipeline_function=mqtt_pipeline_manual_cb.patch_twin_reported_properties,
             kwargs={"error": my_pipeline_error},
         )
         with pytest.raises(client_error) as e_info:
@@ -925,27 +977,25 @@ class SharedClientReceiveTwinDesiredPropertiesPatchTests(object):
     @pytest.mark.it(
         "Implicitly enables Twin desired properties patch feature if not already enabled"
     )
-    def test_enables_twin_patches_only_if_not_already_enabled(
-        self, mocker, client, iothub_pipeline
-    ):
+    def test_enables_twin_patches_only_if_not_already_enabled(self, mocker, client, mqtt_pipeline):
         mocker.patch.object(
             SyncClientInbox, "get"
         )  # patch this so receive_twin_desired_properties_patch won't block
 
         # Verify twin patches enabled if not enabled
-        iothub_pipeline.feature_enabled.__getitem__.return_value = (
+        mqtt_pipeline.feature_enabled.__getitem__.return_value = (
             False
         )  # twin patches will appear disabled
         client.receive_twin_desired_properties_patch()
-        assert iothub_pipeline.enable_feature.call_count == 1
-        assert iothub_pipeline.enable_feature.call_args[0][0] == constant.TWIN_PATCHES
+        assert mqtt_pipeline.enable_feature.call_count == 1
+        assert mqtt_pipeline.enable_feature.call_args[0][0] == constant.TWIN_PATCHES
 
-        iothub_pipeline.enable_feature.reset_mock()
+        mqtt_pipeline.enable_feature.reset_mock()
 
         # Verify twin patches not enabled if already enabled
-        iothub_pipeline.feature_enabled.__getitem__.return_value = True  # C2D will appear enabled
+        mqtt_pipeline.feature_enabled.__getitem__.return_value = True  # C2D will appear enabled
         client.receive_twin_desired_properties_patch()
-        assert iothub_pipeline.enable_feature.call_count == 0
+        assert mqtt_pipeline.enable_feature.call_count == 0
 
     @pytest.mark.it("Returns a patch from the twin patch inbox, if available")
     def test_returns_message_from_twin_patch_inbox(self, mocker, client, twin_patch_desired):
@@ -1026,10 +1076,10 @@ class SharedClientPROPERTYConnectedTests(object):
             client.connected = not client.connected
 
     @pytest.mark.it("Reflects the value of the root stage property of the same name")
-    def test_reflects_pipeline_property(self, client, iothub_pipeline):
-        iothub_pipeline.connected = True
+    def test_reflects_pipeline_property(self, client, mqtt_pipeline):
+        mqtt_pipeline.connected = True
         assert client.connected
-        iothub_pipeline.connected = False
+        mqtt_pipeline.connected = False
         assert not client.connected
 
 
@@ -1042,18 +1092,18 @@ class IoTHubDeviceClientTestsConfig(object):
         return IoTHubDeviceClient
 
     @pytest.fixture
-    def client(self, iothub_pipeline, http_pipeline):
+    def client(self, mqtt_pipeline, http_pipeline):
         """This client automatically resolves callbacks sent to the pipeline.
         It should be used for the majority of tests.
         """
-        return IoTHubDeviceClient(iothub_pipeline, http_pipeline)
+        return IoTHubDeviceClient(mqtt_pipeline, http_pipeline)
 
     @pytest.fixture
-    def client_manual_cb(self, iothub_pipeline_manual_cb, http_pipeline_manual_cb):
+    def client_manual_cb(self, mqtt_pipeline_manual_cb, http_pipeline_manual_cb):
         """This client requires manual triggering of the callbacks sent to the pipeline.
         It should only be used for tests where manual control fo a callback is required.
         """
-        return IoTHubDeviceClient(iothub_pipeline_manual_cb, http_pipeline_manual_cb)
+        return IoTHubDeviceClient(mqtt_pipeline_manual_cb, http_pipeline_manual_cb)
 
     @pytest.fixture
     def connection_string(self, device_connection_string):
@@ -1071,130 +1121,49 @@ class IoTHubDeviceClientTestsConfig(object):
 class TestIoTHubDeviceClientInstantiation(
     IoTHubDeviceClientTestsConfig, SharedClientInstantiationTests
 ):
-    @pytest.mark.it("Sets on_c2d_message_received handler in the IoTHubPipeline")
+    @pytest.mark.it("Sets on_c2d_message_received handler in the MQTTPipeline")
     def test_sets_on_c2d_message_received_handler_in_pipeline(
-        self, client_class, iothub_pipeline, http_pipeline
+        self, client_class, mqtt_pipeline, http_pipeline
     ):
-        client = client_class(iothub_pipeline, http_pipeline)
+        client = client_class(mqtt_pipeline, http_pipeline)
 
-        assert client._iothub_pipeline.on_c2d_message_received is not None
+        assert client._mqtt_pipeline.on_c2d_message_received is not None
         assert (
-            client._iothub_pipeline.on_c2d_message_received
-            == client._inbox_manager.route_c2d_message
+            client._mqtt_pipeline.on_c2d_message_received == client._inbox_manager.route_c2d_message
         )
 
 
 @pytest.mark.describe("IoTHubDeviceClient (Synchronous) - .create_from_connection_string()")
 class TestIoTHubDeviceClientCreateFromConnectionString(
     IoTHubDeviceClientTestsConfig,
+    SharedClientCreateMethodUserOptionTests,
     SharedClientCreateFromConnectionStringTests,
-    ConfigurationSharedClientCreateFromConnectionStringTests,
 ):
-    pass
+    @pytest.fixture
+    def client_create_method(self, client_class):
+        """Provides the specific create method for use in universal tests"""
+        return client_class.create_from_connection_string
 
-
-@pytest.mark.describe(
-    "IoTHubDeviceClient (Synchronous) - .create_from_symmetric_key() -- Configuration"
-)
-class TestConfigurationIoTHubDeviceClientCreateFromSymmetricKey(IoTHubDeviceClientTestsConfig):
-    @pytest.mark.it("Sets all configuration options to default when no user configuration provided")
-    def test_pipeline_configuration_defaults(
-        self,
-        mocker,
-        mock_pipeline_init,
-        client_class,
-        symmetric_key,
-        hostname_fixture,
-        device_id_fixture,
-    ):
-        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
-
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig",
-            wraps=config.IoTHubPipelineConfig,
-        )
-
-        client_class.create_from_symmetric_key(
-            symmetric_key=symmetric_key, hostname=hostname_fixture, device_id=device_id_fixture
-        )
-
-        assert mock_config_init.call_count == 1
-        assert mock_config_init.call_args == mocker.call()
-        assert mock_pipeline_init.call_args[0][1].blob_upload is True
-        assert mock_pipeline_init.call_args[0][1].method_invoke is False
-        assert mock_pipeline_init.call_args[0][1].websockets is False
-        assert mock_pipeline_init.call_args[0][1].product_info == ""
-
-    @pytest.mark.it("Sets all valid configuration options to the user supplied values")
-    @pytest.mark.parametrize(
-        "websockets, product_info",
-        [
-            pytest.param((None, None), (None, None), id=" Setting to None"),
-            pytest.param(
-                (True, True),
-                ("__fake_product_info__", "__fake_product_info__"),
-                id=" Expected Values",
-            ),
-        ],
-    )
-    def test_pipeline_configuration(
-        self,
-        mocker,
-        mock_pipeline_init,
-        client_class,
-        symmetric_key,
-        hostname_fixture,
-        device_id_fixture,
-        websockets,
-        product_info,
-    ):
-        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
-
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig",
-            wraps=config.IoTHubPipelineConfig,
-        )
-
-        kwargs = {"websockets": websockets[0], "product_info": product_info[0]}
-
-        client_class.create_from_symmetric_key(
-            symmetric_key=symmetric_key,
-            hostname=hostname_fixture,
-            device_id=device_id_fixture,
-            **kwargs
-        )
-        assert mock_config_init.call_count == 1
-        assert mock_config_init.call_args == mocker.call(
-            websockets=websockets[0], product_info=product_info[0]
-        )
-        assert mock_pipeline_init.call_args[0][1].websockets == websockets[1]
-        assert mock_pipeline_init.call_args[0][1].product_info == product_info[1]
-
-    @pytest.mark.it("Throws if invalid configuration option is provided")
-    def test_pipeline_configuration_fails_with_bad_option(
-        self,
-        mocker,
-        mock_pipeline_init,
-        client_class,
-        symmetric_key,
-        hostname_fixture,
-        device_id_fixture,
-    ):
-        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
-
-        kwargs = {"bad_option": "__fake_parameter__"}
-
-        with pytest.raises(TypeError):
-            client_class.create_from_symmetric_key(
-                symmetric_key=symmetric_key,
-                hostname=hostname_fixture,
-                device_id=device_id_fixture,
-                **kwargs
-            )
+    @pytest.fixture
+    def create_method_args(self, connection_string):
+        """Provides the specific create method args for use in universal tests"""
+        return [connection_string]
 
 
 @pytest.mark.describe("IoTHubDeviceClient (Synchronous) - .create_from_symmetric_key()")
-class TestIoTHubDeviceClientCreateFromSymmetricKey(IoTHubDeviceClientTestsConfig):
+class TestIoTHubDeviceClientCreateFromSymmetricKey(
+    IoTHubDeviceClientTestsConfig, SharedClientCreateMethodUserOptionTests
+):
+    @pytest.fixture
+    def client_create_method(self, client_class):
+        """Provides the specific create method for use in universal tests"""
+        return client_class.create_from_symmetric_key
+
+    @pytest.fixture
+    def create_method_args(self, symmetric_key, hostname_fixture, device_id_fixture):
+        """Provides the specific create method args for use in universal tests"""
+        return [symmetric_key, hostname_fixture, device_id_fixture]
+
     @pytest.mark.it("Uses the symmetric key to create a SymmetricKeyAuthenticationProvider")
     def test_auth_provider_creation(
         self, mocker, client_class, symmetric_key, hostname_fixture, device_id_fixture
@@ -1215,7 +1184,7 @@ class TestIoTHubDeviceClientCreateFromSymmetricKey(IoTHubDeviceClientTestsConfig
             shared_access_key=symmetric_key,
         )
 
-    @pytest.mark.it("Uses the SymmetricKeyAuthenticationProvider to create an IoTHubPipeline")
+    @pytest.mark.it("Uses the SymmetricKeyAuthenticationProvider to create an MQTTPipeline")
     def test_pipeline_creation(
         self,
         mocker,
@@ -1223,28 +1192,28 @@ class TestIoTHubDeviceClientCreateFromSymmetricKey(IoTHubDeviceClientTestsConfig
         symmetric_key,
         hostname_fixture,
         device_id_fixture,
-        mock_pipeline_init,
+        mock_mqtt_pipeline_init,
     ):
         mock_auth = mocker.patch(
             "azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider"
         ).return_value
 
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig"
-        )
+        mock_config_init = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipelineConfig")
 
         client_class.create_from_symmetric_key(
             symmetric_key=symmetric_key, hostname=hostname_fixture, device_id=device_id_fixture
         )
 
-        assert mock_pipeline_init.call_count == 1
-        assert mock_pipeline_init.call_args == mocker.call(mock_auth, mock_config_init.return_value)
+        assert mock_mqtt_pipeline_init.call_count == 1
+        assert mock_mqtt_pipeline_init.call_args == mocker.call(
+            mock_auth, mock_config_init.return_value
+        )
 
-    @pytest.mark.it("Uses the IoTHubPipeline to instantiate the client")
+    @pytest.mark.it("Uses the MQTTPipeline to instantiate the client")
     def test_client_instantiation(
         self, mocker, client_class, symmetric_key, hostname_fixture, device_id_fixture
     ):
-        mock_pipeline = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipeline").return_value
+        mock_pipeline = mocker.patch("azure.iot.device.iothub.pipeline.MQTTPipeline").return_value
         mock_pipeline_http = mocker.patch(
             "azure.iot.device.iothub.pipeline.HTTPPipeline"
         ).return_value
@@ -1264,84 +1233,22 @@ class TestIoTHubDeviceClientCreateFromSymmetricKey(IoTHubDeviceClientTestsConfig
         assert isinstance(client, client_class)
 
 
-@pytest.mark.describe(
-    "IoTHubDeviceClient (Synchronous) - .create_from_x509_certificate() -- Configuration"
-)
-class TestConfigurationIoTHubDeviceClientCreateFromX509Certificate(IoTHubDeviceClientTestsConfig):
-    hostname = "durmstranginstitute.farend"
-    device_id = "MySnitch"
-
-    @pytest.mark.it("Sets all configuration options to default when no user configuration provided")
-    def test_pipeline_configuration_defaults(self, mocker, mock_pipeline_init, client_class, x509):
-        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
-
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig",
-            wraps=config.IoTHubPipelineConfig,
-        )
-
-        client_class.create_from_x509_certificate(
-            x509=x509, hostname=self.hostname, device_id=self.device_id
-        )
-        assert mock_config_init.call_count == 1
-        assert mock_config_init.call_args == mocker.call()
-        assert mock_pipeline_init.call_args[0][1].blob_upload is True
-        assert mock_pipeline_init.call_args[0][1].method_invoke is False
-        assert mock_pipeline_init.call_args[0][1].websockets is False
-        assert mock_pipeline_init.call_args[0][1].product_info == ""
-
-    @pytest.mark.it("Sets all valid configuration options to the user supplied values")
-    @pytest.mark.parametrize(
-        "websockets, product_info",
-        [
-            pytest.param((None, None), (None, None), id=" Setting to None"),
-            pytest.param(
-                (True, True),
-                ("__fake_product_info__", "__fake_product_info__"),
-                id=" Expected Values",
-            ),
-        ],
-    )
-    def test_pipeline_configuration(
-        self, mocker, mock_pipeline_init, client_class, x509, websockets, product_info
-    ):
-        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
-
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig",
-            wraps=config.IoTHubPipelineConfig,
-        )
-
-        kwargs = {"websockets": websockets[0], "product_info": product_info[0]}
-
-        client_class.create_from_x509_certificate(
-            x509=x509, hostname=self.hostname, device_id=self.device_id, **kwargs
-        )
-        assert mock_config_init.call_count == 1
-        assert mock_config_init.call_args == mocker.call(
-            websockets=websockets[0], product_info=product_info[0]
-        )
-        assert mock_pipeline_init.call_args[0][1].websockets == websockets[1]
-        assert mock_pipeline_init.call_args[0][1].product_info == product_info[1]
-
-    @pytest.mark.it("Throws if invalid configuration option is provided")
-    def test_pipeline_configuration_fails_with_bad_option(
-        self, mocker, mock_pipeline_init, client_class, x509
-    ):
-        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
-
-        kwargs = {"bad_option": "__fake_parameter__"}
-
-        with pytest.raises(TypeError):
-            client_class.create_from_x509_certificate(
-                x509=x509, hostname=self.hostname, device_id=self.device_id, **kwargs
-            )
-
-
 @pytest.mark.describe("IoTHubDeviceClient (Synchronous) - .create_from_x509_certificate()")
-class TestIoTHubDeviceClientCreateFromX509Certificate(IoTHubDeviceClientTestsConfig):
+class TestIoTHubDeviceClientCreateFromX509Certificate(
+    IoTHubDeviceClientTestsConfig, SharedClientCreateMethodUserOptionTests
+):
     hostname = "durmstranginstitute.farend"
     device_id = "MySnitch"
+
+    @pytest.fixture
+    def client_create_method(self, client_class):
+        """Provides the specific create method for use in universal tests"""
+        return client_class.create_from_x509_certificate
+
+    @pytest.fixture
+    def create_method_args(self, x509):
+        """Provides the specific create method args for use in universal tests"""
+        return [x509, self.hostname, self.device_id]
 
     @pytest.mark.it("Uses the provided arguments to create a X509AuthenticationProvider")
     def test_auth_provider_creation(self, mocker, client_class, x509):
@@ -1356,26 +1263,26 @@ class TestIoTHubDeviceClientCreateFromX509Certificate(IoTHubDeviceClientTestsCon
             x509=x509, hostname=self.hostname, device_id=self.device_id
         )
 
-    @pytest.mark.it("Uses the X509AuthenticationProvider to create an IoTHubPipeline")
-    def test_pipeline_creation(self, mocker, client_class, x509, mock_pipeline_init):
+    @pytest.mark.it("Uses the X509AuthenticationProvider to create an MQTTPipeline")
+    def test_pipeline_creation(self, mocker, client_class, x509, mock_mqtt_pipeline_init):
         mock_auth = mocker.patch(
             "azure.iot.device.iothub.auth.X509AuthenticationProvider"
         ).return_value
 
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig"
-        )
+        mock_config_init = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipelineConfig")
 
         client_class.create_from_x509_certificate(
             x509=x509, hostname=self.hostname, device_id=self.device_id
         )
 
-        assert mock_pipeline_init.call_count == 1
-        assert mock_pipeline_init.call_args == mocker.call(mock_auth, mock_config_init.return_value)
+        assert mock_mqtt_pipeline_init.call_count == 1
+        assert mock_mqtt_pipeline_init.call_args == mocker.call(
+            mock_auth, mock_config_init.return_value
+        )
 
-    @pytest.mark.it("Uses the IoTHubPipeline to instantiate the client")
+    @pytest.mark.it("Uses the MQTTPipeline to instantiate the client")
     def test_client_instantiation(self, mocker, client_class, x509):
-        mock_pipeline = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipeline").return_value
+        mock_pipeline = mocker.patch("azure.iot.device.iothub.pipeline.MQTTPipeline").return_value
         mock_pipeline_http = mocker.patch(
             "azure.iot.device.iothub.pipeline.HTTPPipeline"
         ).return_value
@@ -1424,23 +1331,21 @@ class TestIoTHubDeviceClientSendD2CMessage(
 @pytest.mark.describe("IoTHubDeviceClient (Synchronous) - .receive_message()")
 class TestIoTHubDeviceClientReceiveC2DMessage(IoTHubDeviceClientTestsConfig):
     @pytest.mark.it("Implicitly enables C2D messaging feature if not already enabled")
-    def test_enables_c2d_messaging_only_if_not_already_enabled(
-        self, mocker, client, iothub_pipeline
-    ):
+    def test_enables_c2d_messaging_only_if_not_already_enabled(self, mocker, client, mqtt_pipeline):
         mocker.patch.object(SyncClientInbox, "get")  # patch this so receive_message won't block
 
         # Verify C2D Messaging enabled if not enabled
-        iothub_pipeline.feature_enabled.__getitem__.return_value = False  # C2D will appear disabled
+        mqtt_pipeline.feature_enabled.__getitem__.return_value = False  # C2D will appear disabled
         client.receive_message()
-        assert iothub_pipeline.enable_feature.call_count == 1
-        assert iothub_pipeline.enable_feature.call_args[0][0] == constant.C2D_MSG
+        assert mqtt_pipeline.enable_feature.call_count == 1
+        assert mqtt_pipeline.enable_feature.call_args[0][0] == constant.C2D_MSG
 
-        iothub_pipeline.enable_feature.reset_mock()
+        mqtt_pipeline.enable_feature.reset_mock()
 
         # Verify C2D Messaging not enabled if already enabled
-        iothub_pipeline.feature_enabled.__getitem__.return_value = True  # C2D will appear enabled
+        mqtt_pipeline.feature_enabled.__getitem__.return_value = True  # C2D will appear enabled
         client.receive_message()
-        assert iothub_pipeline.enable_feature.call_count == 0
+        assert mqtt_pipeline.enable_feature.call_count == 0
 
     @pytest.mark.it("Returns a message from the C2D inbox, if available")
     def test_returns_message_from_c2d_inbox(self, mocker, client, message):
@@ -1704,18 +1609,18 @@ class IoTHubModuleClientTestsConfig(object):
         return IoTHubModuleClient
 
     @pytest.fixture
-    def client(self, iothub_pipeline, http_pipeline):
+    def client(self, mqtt_pipeline, http_pipeline):
         """This client automatically resolves callbacks sent to the pipeline.
         It should be used for the majority of tests.
         """
-        return IoTHubModuleClient(iothub_pipeline, http_pipeline)
+        return IoTHubModuleClient(mqtt_pipeline, http_pipeline)
 
     @pytest.fixture
-    def client_manual_cb(self, iothub_pipeline_manual_cb, http_pipeline_manual_cb):
+    def client_manual_cb(self, mqtt_pipeline_manual_cb, http_pipeline_manual_cb):
         """This client requires manual triggering of the callbacks sent to the pipeline.
         It should only be used for tests where manual control fo a callback is required.
         """
-        return IoTHubModuleClient(iothub_pipeline_manual_cb, http_pipeline_manual_cb)
+        return IoTHubModuleClient(mqtt_pipeline_manual_cb, http_pipeline_manual_cb)
 
     @pytest.fixture
     def connection_string(self, module_connection_string):
@@ -1733,15 +1638,15 @@ class IoTHubModuleClientTestsConfig(object):
 class TestIoTHubModuleClientInstantiation(
     IoTHubModuleClientTestsConfig, SharedClientInstantiationTests
 ):
-    @pytest.mark.it("Sets on_input_message_received handler in the IoTHubPipeline")
+    @pytest.mark.it("Sets on_input_message_received handler in the MQTTPipeline")
     def test_sets_on_input_message_received_handler_in_pipeline(
-        self, client_class, iothub_pipeline, http_pipeline
+        self, client_class, mqtt_pipeline, http_pipeline
     ):
-        client = client_class(iothub_pipeline, http_pipeline)
+        client = client_class(mqtt_pipeline, http_pipeline)
 
-        assert client._iothub_pipeline.on_input_message_received is not None
+        assert client._mqtt_pipeline.on_input_message_received is not None
         assert (
-            client._iothub_pipeline.on_input_message_received
+            client._mqtt_pipeline.on_input_message_received
             == client._inbox_manager.route_input_message
         )
 
@@ -1749,23 +1654,102 @@ class TestIoTHubModuleClientInstantiation(
 @pytest.mark.describe("IoTHubModuleClient (Synchronous) - .create_from_connection_string()")
 class TestIoTHubModuleClientCreateFromConnectionString(
     IoTHubModuleClientTestsConfig,
+    SharedClientCreateMethodUserOptionTests,
     SharedClientCreateFromConnectionStringTests,
-    ConfigurationSharedClientCreateFromConnectionStringTests,
 ):
-    pass
+    @pytest.fixture
+    def client_create_method(self, client_class):
+        """Provides the specific create method for use in universal tests"""
+        return client_class.create_from_connection_string
+
+    @pytest.fixture
+    def create_method_args(self, connection_string):
+        """Provides the specific create method args for use in universal tests"""
+        return [connection_string]
+
+
+class IoTHubModuleClientClientCreateFromEdgeEnvironmentUserOptionTests(
+    SharedClientCreateMethodUserOptionTests
+):
+    """This class inherites the user option tests shared by all create method APIs, and overrides
+    tests in order to accomodate unique requirements for the .create_from_edge_enviornment() method.
+
+    Because .create_from_edge_environment() tests are spread accross multiple test units
+    (i.e. test classes), these overrides are done in this class, which is then inherited by all
+    .create_from_edge_environment() test units below.
+    """
+
+    @pytest.fixture
+    def client_create_method(self, client_class):
+        """Provides the specific create method for use in universal tests"""
+        return client_class.create_from_edge_environment
+
+    @pytest.fixture
+    def create_method_args(self):
+        """Provides the specific create method args for use in universal tests"""
+        return []
+
+    @pytest.mark.it(
+        "Raises a TypeError if the 'server_verification_cert' user option parameter is provided"
+    )
+    def test_server_verification_cert_option(
+        self,
+        option_test_required_patching,
+        client_create_method,
+        create_method_args,
+        mock_mqtt_pipeline_init,
+        mock_http_pipeline_init,
+    ):
+        """THIS TEST OVERRIDES AN INHERITED TEST"""
+
+        with pytest.raises(TypeError):
+            client_create_method(
+                *create_method_args, server_verification_cert="fake_server_verification_cert"
+            )
+
+    @pytest.mark.it("Sets default user options if none are provided")
+    def test_default_options(
+        self,
+        option_test_required_patching,
+        client_create_method,
+        create_method_args,
+        mock_mqtt_pipeline_init,
+        mock_http_pipeline_init,
+    ):
+        """THIS TEST OVERRIDES AN INHERITED TEST"""
+        client_create_method(*create_method_args)
+
+        # Get configuration object, and ensure it was used for both protocol pipelines
+        assert mock_mqtt_pipeline_init.call_count == 1
+        config = mock_mqtt_pipeline_init.call_args[0][1]
+        assert config == mock_http_pipeline_init.call_args[0][1]
+
+        # Get auth provider object, and ensure it was used for both protocol pipelines
+        auth = mock_mqtt_pipeline_init.call_args[0][0]
+        assert auth == mock_http_pipeline_init.call_args[0][0]
+
+        assert config.product_info == ""
+        assert not config.websockets
+        assert not config.cipher
 
 
 @pytest.mark.describe(
     "IoTHubModuleClient (Synchronous) - .create_from_edge_environment() -- Edge Container Environment"
 )
 class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithContainerEnv(
-    IoTHubModuleClientTestsConfig
+    IoTHubModuleClientTestsConfig, IoTHubModuleClientClientCreateFromEdgeEnvironmentUserOptionTests
 ):
+    @pytest.fixture
+    def option_test_required_patching(self, mocker, edge_container_environment):
+        """THIS FIXTURE OVERRIDES AN INHERITED FIXTURE"""
+        mocker.patch("azure.iot.device.iothub.auth.IoTEdgeAuthenticationProvider")
+        mocker.patch.dict(os.environ, edge_container_environment, clear=True)
+
     @pytest.mark.it(
         "Uses Edge container environment variables to create an IoTEdgeAuthenticationProvider"
     )
     def test_auth_provider_creation(self, mocker, client_class, edge_container_environment):
-        mocker.patch.dict(os.environ, edge_container_environment)
+        mocker.patch.dict(os.environ, edge_container_environment, clear=True)
         mock_auth_init = mocker.patch("azure.iot.device.iothub.auth.IoTEdgeAuthenticationProvider")
 
         client_class.create_from_edge_environment()
@@ -1790,7 +1774,7 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithContainerEnv(
         # This test verifies that with a hybrid environment, the auth provider will always be
         # an IoTEdgeAuthenticationProvider, even if local debug variables are present
         hybrid_environment = merge_dicts(edge_container_environment, edge_local_debug_environment)
-        mocker.patch.dict(os.environ, hybrid_environment)
+        mocker.patch.dict(os.environ, hybrid_environment, clear=True)
         mock_edge_auth_init = mocker.patch(
             "azure.iot.device.iothub.auth.IoTEdgeAuthenticationProvider"
         )
@@ -1813,23 +1797,21 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithContainerEnv(
         )
 
     @pytest.mark.it(
-        "Uses the IoTEdgeAuthenticationProvider to create an IoTHubPipeline and an HTTPPipeline"
+        "Uses the IoTEdgeAuthenticationProvider to create an MQTTPipeline and an HTTPPipeline"
     )
     def test_pipeline_creation(self, mocker, client_class, edge_container_environment):
-        mocker.patch.dict(os.environ, edge_container_environment)
+        mocker.patch.dict(os.environ, edge_container_environment, clear=True)
         mock_auth = mocker.patch(
             "azure.iot.device.iothub.auth.IoTEdgeAuthenticationProvider"
         ).return_value
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig"
-        )
-        mock_iothub_pipeline_init = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipeline")
+        mock_config_init = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipelineConfig")
+        mock_mqtt_pipeline_init = mocker.patch("azure.iot.device.iothub.pipeline.MQTTPipeline")
         mock_http_pipeline_init = mocker.patch("azure.iot.device.iothub.pipeline.HTTPPipeline")
 
         client_class.create_from_edge_environment()
 
-        assert mock_iothub_pipeline_init.call_count == 1
-        assert mock_iothub_pipeline_init.call_args == mocker.call(
+        assert mock_mqtt_pipeline_init.call_count == 1
+        assert mock_mqtt_pipeline_init.call_args == mocker.call(
             mock_auth, mock_config_init.return_value
         )
         assert mock_http_pipeline_init.call_count == 1
@@ -1838,13 +1820,13 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithContainerEnv(
             mock_auth, mock_config_init.return_value
         )
 
-    @pytest.mark.it("Uses the IoTHubPipeline and the HTTPPipeline to instantiate the client")
+    @pytest.mark.it("Uses the MQTTPipeline and the HTTPPipeline to instantiate the client")
     def test_client_instantiation(self, mocker, client_class, edge_container_environment):
-        mocker.patch.dict(os.environ, edge_container_environment)
+        mocker.patch.dict(os.environ, edge_container_environment, clear=True)
         # Always patch the IoTEdgeAuthenticationProvider to prevent I/O operations
         mocker.patch("azure.iot.device.iothub.auth.IoTEdgeAuthenticationProvider")
-        mock_iothub_pipeline = mocker.patch(
-            "azure.iot.device.iothub.pipeline.IoTHubPipeline"
+        mock_mqtt_pipeline = mocker.patch(
+            "azure.iot.device.iothub.pipeline.MQTTPipeline"
         ).return_value
         mock_http_pipeline = mocker.patch(
             "azure.iot.device.iothub.pipeline.HTTPPipeline"
@@ -1854,13 +1836,11 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithContainerEnv(
         client_class.create_from_edge_environment()
 
         assert spy_init.call_count == 1
-        assert spy_init.call_args == mocker.call(
-            mocker.ANY, mock_iothub_pipeline, mock_http_pipeline
-        )
+        assert spy_init.call_args == mocker.call(mocker.ANY, mock_mqtt_pipeline, mock_http_pipeline)
 
     @pytest.mark.it("Returns the instantiated client")
     def test_returns_client(self, mocker, client_class, edge_container_environment):
-        mocker.patch.dict(os.environ, edge_container_environment)
+        mocker.patch.dict(os.environ, edge_container_environment, clear=True)
         # Always patch the IoTEdgeAuthenticationProvider to prevent I/O operations
         mocker.patch("azure.iot.device.iothub.auth.IoTEdgeAuthenticationProvider")
 
@@ -1886,14 +1866,14 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithContainerEnv(
     ):
         # Remove a variable from the fixture
         del edge_container_environment[missing_env_var]
-        mocker.patch.dict(os.environ, edge_container_environment)
+        mocker.patch.dict(os.environ, edge_container_environment, clear=True)
 
         with pytest.raises(OSError):
             client_class.create_from_edge_environment()
 
     @pytest.mark.it("Raises OSError if there is an error using the Edge for authentication")
     def test_bad_edge_auth(self, mocker, client_class, edge_container_environment):
-        mocker.patch.dict(os.environ, edge_container_environment)
+        mocker.patch.dict(os.environ, edge_container_environment, clear=True)
         mock_auth = mocker.patch("azure.iot.device.iothub.auth.IoTEdgeAuthenticationProvider")
         my_edge_error = IoTEdgeError()
         mock_auth.side_effect = my_edge_error
@@ -1904,97 +1884,18 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithContainerEnv(
 
 
 @pytest.mark.describe(
-    "IoTHubModuleClient (Synchronous) - .create_from_edge_environment() -- Edge Local Debug Environment -- Configuration"
-)
-class TestConfigurationIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(
-    IoTHubModuleClientTestsConfig
-):
-    @pytest.fixture
-    def mock_open(self, mocker):
-        return mocker.patch.object(io, "open")
-
-    @pytest.mark.it("Sets all configuration options to default when no user configuration provided")
-    def test_pipeline_configuration_defaults(
-        self, mocker, client_class, edge_local_debug_environment, mock_open
-    ):
-        mocker.patch.dict(os.environ, edge_local_debug_environment)
-        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
-
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig",
-            wraps=config.IoTHubPipelineConfig,
-        )
-        mock_iothub_pipeline_init = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipeline")
-        mocker.patch("azure.iot.device.iothub.pipeline.HTTPPipeline")
-
-        client_class.create_from_edge_environment()
-
-        assert mock_config_init.call_count == 1
-        assert mock_config_init.call_args == mocker.call()
-        assert mock_iothub_pipeline_init.call_args[0][1].blob_upload is False
-        assert mock_iothub_pipeline_init.call_args[0][1].method_invoke is True
-        assert mock_iothub_pipeline_init.call_args[0][1].websockets is False
-        assert mock_iothub_pipeline_init.call_args[0][1].product_info == ""
-
-    @pytest.mark.it("Sets all valid configuration options to the user supplied values")
-    @pytest.mark.parametrize(
-        "websockets, product_info",
-        [
-            pytest.param((None, None), (None, None), id=" Setting to None"),
-            pytest.param(
-                (True, True),
-                ("__fake_product_info__", "__fake_product_info__"),
-                id=" Expected Values",
-            ),
-        ],
-    )
-    def test_pipeline_configuration(
-        self,
-        mocker,
-        client_class,
-        edge_local_debug_environment,
-        websockets,
-        product_info,
-        mock_open,
-    ):
-        mocker.patch.dict(os.environ, edge_local_debug_environment)
-        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
-
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig",
-            wraps=config.IoTHubPipelineConfig,
-        )
-        mock_iothub_pipeline_init = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipeline")
-        mocker.patch("azure.iot.device.iothub.pipeline.HTTPPipeline")
-
-        kwargs = {"websockets": websockets[0], "product_info": product_info[0]}
-
-        client_class.create_from_edge_environment(**kwargs)
-
-        assert mock_config_init.call_count == 1
-        assert mock_config_init.call_args == mocker.call(
-            websockets=websockets[0], product_info=product_info[0]
-        )
-        assert mock_iothub_pipeline_init.call_args[0][1].websockets == websockets[1]
-        assert mock_iothub_pipeline_init.call_args[0][1].product_info == product_info[1]
-
-    @pytest.mark.it("Throws if invalid configuration option is provided")
-    def test_pipeline_configuration_fails_with_bad_option(
-        self, mocker, mock_pipeline_init, client_class, edge_local_debug_environment, mock_open
-    ):
-        mocker.patch.dict(os.environ, edge_local_debug_environment)
-        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
-
-        kwargs = {"bad_option": "__fake_parameter__"}
-
-        with pytest.raises(TypeError):
-            client_class.create_from_edge_environment(**kwargs)
-
-
-@pytest.mark.describe(
     "IoTHubModuleClient (Synchronous) - .create_from_edge_environment() -- Edge Local Debug Environment"
 )
-class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(IoTHubModuleClientTestsConfig):
+class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(
+    IoTHubModuleClientTestsConfig, IoTHubModuleClientClientCreateFromEdgeEnvironmentUserOptionTests
+):
+    @pytest.fixture
+    def option_test_required_patching(self, mocker, edge_local_debug_environment):
+        """THIS FIXTURE OVERRIDES AN INHERITED FIXTURE"""
+        mocker.patch("azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider")
+        mocker.patch.dict(os.environ, edge_local_debug_environment, clear=True)
+        mocker.patch.object(io, "open")
+
     @pytest.fixture
     def mock_open(self, mocker):
         return mocker.patch.object(io, "open")
@@ -2006,7 +1907,7 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(IoTHubModuleCl
         self, mocker, client_class, edge_local_debug_environment, mock_open
     ):
         mock_file_handle = mock_open.return_value.__enter__.return_value
-        mocker.patch.dict(os.environ, edge_local_debug_environment)
+        mocker.patch.dict(os.environ, edge_local_debug_environment, clear=True)
         client_class.create_from_edge_environment()
         assert mock_open.call_count == 1
         assert mock_open.call_args == mocker.call(
@@ -2021,7 +1922,7 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(IoTHubModuleCl
         self, mocker, client_class, edge_local_debug_environment, mock_open
     ):
         expected_cert = mock_open.return_value.__enter__.return_value.read.return_value
-        mocker.patch.dict(os.environ, edge_local_debug_environment)
+        mocker.patch.dict(os.environ, edge_local_debug_environment, clear=True)
         mock_auth_parse = mocker.patch(
             "azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider"
         ).parse
@@ -2048,7 +1949,7 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(IoTHubModuleCl
         # This test verifies that with a hybrid environment, the auth provider will always be
         # an IoTEdgeAuthenticationProvider, even if local debug variables are present
         hybrid_environment = merge_dicts(edge_container_environment, edge_local_debug_environment)
-        mocker.patch.dict(os.environ, hybrid_environment)
+        mocker.patch.dict(os.environ, hybrid_environment, clear=True)
         mock_edge_auth_init = mocker.patch(
             "azure.iot.device.iothub.auth.IoTEdgeAuthenticationProvider"
         )
@@ -2071,23 +1972,21 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(IoTHubModuleCl
         )
 
     @pytest.mark.it(
-        "Uses the SymmetricKeyAuthenticationProvider to create an IoTHubPipeline and an HTTPPipeline"
+        "Uses the SymmetricKeyAuthenticationProvider to create an MQTTPipeline and an HTTPPipeline"
     )
     def test_pipeline_creation(self, mocker, client_class, edge_local_debug_environment, mock_open):
-        mocker.patch.dict(os.environ, edge_local_debug_environment)
+        mocker.patch.dict(os.environ, edge_local_debug_environment, clear=True)
         mock_auth = mocker.patch(
             "azure.iot.device.iothub.auth.SymmetricKeyAuthenticationProvider"
         ).parse.return_value
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig"
-        )
-        mock_iothub_pipeline_init = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipeline")
+        mock_config_init = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipelineConfig")
+        mock_mqtt_pipeline_init = mocker.patch("azure.iot.device.iothub.pipeline.MQTTPipeline")
         mock_http_pipeline_init = mocker.patch("azure.iot.device.iothub.pipeline.HTTPPipeline")
 
         client_class.create_from_edge_environment()
 
-        assert mock_iothub_pipeline_init.call_count == 1
-        assert mock_iothub_pipeline_init.call_args == mocker.call(
+        assert mock_mqtt_pipeline_init.call_count == 1
+        assert mock_mqtt_pipeline_init.call_args == mocker.call(
             mock_auth, mock_config_init.return_value
         )
         assert mock_http_pipeline_init.call_count == 1
@@ -2095,13 +1994,13 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(IoTHubModuleCl
             mock_auth, mock_config_init.return_value
         )
 
-    @pytest.mark.it("Uses the IoTHubPipeline and the HTTPPipeline to instantiate the client")
+    @pytest.mark.it("Uses the MQTTPipeline and the HTTPPipeline to instantiate the client")
     def test_client_instantiation(
         self, mocker, client_class, edge_local_debug_environment, mock_open
     ):
-        mocker.patch.dict(os.environ, edge_local_debug_environment)
-        mock_iothub_pipeline = mocker.patch(
-            "azure.iot.device.iothub.pipeline.IoTHubPipeline"
+        mocker.patch.dict(os.environ, edge_local_debug_environment, clear=True)
+        mock_mqtt_pipeline = mocker.patch(
+            "azure.iot.device.iothub.pipeline.MQTTPipeline"
         ).return_value
         mock_http_pipeline = mocker.patch(
             "azure.iot.device.iothub.pipeline.HTTPPipeline"
@@ -2111,13 +2010,11 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(IoTHubModuleCl
         client_class.create_from_edge_environment()
 
         assert spy_init.call_count == 1
-        assert spy_init.call_args == mocker.call(
-            mocker.ANY, mock_iothub_pipeline, mock_http_pipeline
-        )
+        assert spy_init.call_args == mocker.call(mocker.ANY, mock_mqtt_pipeline, mock_http_pipeline)
 
     @pytest.mark.it("Returns the instantiated client")
     def test_returns_client(self, mocker, client_class, edge_local_debug_environment, mock_open):
-        mocker.patch.dict(os.environ, edge_local_debug_environment)
+        mocker.patch.dict(os.environ, edge_local_debug_environment, clear=True)
 
         client = client_class.create_from_edge_environment()
 
@@ -2132,7 +2029,7 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(IoTHubModuleCl
     ):
         # Remove a variable from the fixture
         del edge_local_debug_environment[missing_env_var]
-        mocker.patch.dict(os.environ, edge_local_debug_environment)
+        mocker.patch.dict(os.environ, edge_local_debug_environment, clear=True)
 
         with pytest.raises(OSError):
             client_class.create_from_edge_environment()
@@ -2158,7 +2055,7 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(IoTHubModuleCl
         self, mocker, client_class, edge_local_debug_environment, bad_cs, mock_open
     ):
         edge_local_debug_environment["EdgeHubConnectionString"] = bad_cs
-        mocker.patch.dict(os.environ, edge_local_debug_environment)
+        mocker.patch.dict(os.environ, edge_local_debug_environment, clear=True)
 
         with pytest.raises(ValueError):
             client_class.create_from_edge_environment()
@@ -2173,7 +2070,7 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(IoTHubModuleCl
         except NameError:
             FileNotFoundError = IOError
 
-        mocker.patch.dict(os.environ, edge_local_debug_environment)
+        mocker.patch.dict(os.environ, edge_local_debug_environment, clear=True)
         my_fnf_error = FileNotFoundError()
         mock_open.side_effect = my_fnf_error
         with pytest.raises(ValueError) as e_info:
@@ -2189,104 +2086,30 @@ class TestIoTHubModuleClientCreateFromEdgeEnvironmentWithDebugEnv(IoTHubModuleCl
             error = IOError()
         else:
             error = OSError()
-        mocker.patch.dict(os.environ, edge_local_debug_environment)
+        mocker.patch.dict(os.environ, edge_local_debug_environment, clear=True)
         mock_open.side_effect = error
         with pytest.raises(ValueError) as e_info:
             client_class.create_from_edge_environment()
         assert e_info.value.__cause__ is error
 
 
-@pytest.mark.describe(
-    "IoTHubModuleClient (Synchronous) - .create_from_x509_certificate() -- Configuration"
-)
-class TestConfigurationIoTHubModuleClientCreateFromX509Certificate(IoTHubModuleClientTestsConfig):
-    hostname = "durmstranginstitute.farend"
-    device_id = "MySnitch"
-    module_id = "Charms"
-
-    @pytest.mark.it("Sets all configuration options to default when no user configuration provided")
-    def test_pipeline_configuration_defaults(self, mocker, client_class, mock_pipeline_init, x509):
-        mocker.patch("azure.iot.device.iothub.auth.X509AuthenticationProvider")
-
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig",
-            wraps=config.IoTHubPipelineConfig,
-        )
-
-        client_class.create_from_x509_certificate(
-            x509=x509, hostname=self.hostname, device_id=self.device_id, module_id=self.module_id
-        )
-
-        assert mock_config_init.call_count == 1
-        assert mock_config_init.call_args == mocker.call()
-        assert mock_pipeline_init.call_args[0][1].blob_upload is False
-        assert mock_pipeline_init.call_args[0][1].method_invoke is False
-        assert mock_pipeline_init.call_args[0][1].websockets is False
-        assert mock_pipeline_init.call_args[0][1].product_info == ""
-
-    @pytest.mark.it("Sets all valid configuration options to the user supplied values")
-    @pytest.mark.parametrize(
-        "websockets, product_info",
-        [
-            pytest.param((None, None), (None, None), id=" Setting to None"),
-            pytest.param(
-                (True, True),
-                ("__fake_product_info__", "__fake_product_info__"),
-                id=" Expected Values",
-            ),
-        ],
-    )
-    def test_pipeline_configuration(
-        self, mocker, client_class, mock_pipeline_init, x509, websockets, product_info
-    ):
-        mocker.patch("azure.iot.device.iothub.auth.X509AuthenticationProvider")
-
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig",
-            wraps=config.IoTHubPipelineConfig,
-        )
-
-        kwargs = {"websockets": websockets[0], "product_info": product_info[0]}
-
-        client_class.create_from_x509_certificate(
-            x509=x509,
-            hostname=self.hostname,
-            device_id=self.device_id,
-            module_id=self.module_id,
-            **kwargs
-        )
-
-        assert mock_config_init.call_count == 1
-        assert mock_config_init.call_args == mocker.call(
-            websockets=websockets[0], product_info=product_info[0]
-        )
-
-        assert mock_pipeline_init.call_args[0][1].websockets == websockets[1]
-        assert mock_pipeline_init.call_args[0][1].product_info == product_info[1]
-
-    @pytest.mark.it("Throws if invalid configuration option is provided")
-    def test_pipeline_configuration_fails_with_bad_option(
-        self, mocker, mock_pipeline_init, client_class, x509
-    ):
-        mocker.patch("azure.iot.device.iothub.auth.X509AuthenticationProvider")
-
-        kwargs = {"bad_option": "__fake_parameter__"}
-
-        with pytest.raises(TypeError):
-            client_class.create_from_x509_certificate(
-                x509=x509,
-                hostname=self.hostname,
-                device_id=self.device_id,
-                module_id=self.module_id,
-                **kwargs
-            )
-
-
 @pytest.mark.describe("IoTHubModuleClient (Synchronous) - .create_from_x509_certificate()")
-class TestIoTHubModuleClientCreateFromX509Certificate(IoTHubModuleClientTestsConfig):
+class TestIoTHubModuleClientCreateFromX509Certificate(
+    IoTHubModuleClientTestsConfig, SharedClientCreateMethodUserOptionTests
+):
     hostname = "durmstranginstitute.farend"
     device_id = "MySnitch"
     module_id = "Charms"
+
+    @pytest.fixture
+    def client_create_method(self, client_class):
+        """Provides the specific create method for use in universal tests"""
+        return client_class.create_from_x509_certificate
+
+    @pytest.fixture
+    def create_method_args(self, x509):
+        """Provides the specific create method args for use in universal tests"""
+        return [x509, self.hostname, self.device_id, self.module_id]
 
     @pytest.mark.it("Uses the provided arguments to create a X509AuthenticationProvider")
     def test_auth_provider_creation(self, mocker, client_class, x509):
@@ -2301,26 +2124,26 @@ class TestIoTHubModuleClientCreateFromX509Certificate(IoTHubModuleClientTestsCon
             x509=x509, hostname=self.hostname, device_id=self.device_id, module_id=self.module_id
         )
 
-    @pytest.mark.it("Uses the X509AuthenticationProvider to create an IoTHubPipeline")
-    def test_pipeline_creation(self, mocker, client_class, x509, mock_pipeline_init):
+    @pytest.mark.it("Uses the X509AuthenticationProvider to create an MQTTPipeline")
+    def test_pipeline_creation(self, mocker, client_class, x509, mock_mqtt_pipeline_init):
         mock_auth = mocker.patch(
             "azure.iot.device.iothub.auth.X509AuthenticationProvider"
         ).return_value
 
-        mock_config_init = mocker.patch(
-            "azure.iot.device.iothub.abstract_clients.IoTHubPipelineConfig"
-        )
+        mock_config_init = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipelineConfig")
 
         client_class.create_from_x509_certificate(
             x509=x509, hostname=self.hostname, device_id=self.device_id, module_id=self.module_id
         )
 
-        assert mock_pipeline_init.call_count == 1
-        assert mock_pipeline_init.call_args == mocker.call(mock_auth, mock_config_init.return_value)
+        assert mock_mqtt_pipeline_init.call_count == 1
+        assert mock_mqtt_pipeline_init.call_args == mocker.call(
+            mock_auth, mock_config_init.return_value
+        )
 
-    @pytest.mark.it("Uses the IoTHubPipeline to instantiate the client")
+    @pytest.mark.it("Uses the MQTTPipeline to instantiate the client")
     def test_client_instantiation(self, mocker, client_class, x509):
-        mock_pipeline = mocker.patch("azure.iot.device.iothub.pipeline.IoTHubPipeline").return_value
+        mock_pipeline = mocker.patch("azure.iot.device.iothub.pipeline.MQTTPipeline").return_value
         mock_pipeline_http = mocker.patch(
             "azure.iot.device.iothub.pipeline.HTTPPipeline"
         ).return_value
@@ -2370,21 +2193,21 @@ class TestIoTHubNModuleClientSendD2CMessage(
 @pytest.mark.describe("IoTHubModuleClient (Synchronous) - .send_message_to_output()")
 class TestIoTHubModuleClientSendToOutput(IoTHubModuleClientTestsConfig, WaitsForEventCompletion):
     @pytest.mark.it("Begins a 'send_output_event' pipeline operation")
-    def test_calls_pipeline_send_message_to_output(self, client, iothub_pipeline, message):
+    def test_calls_pipeline_send_message_to_output(self, client, mqtt_pipeline, message):
         output_name = "some_output"
         client.send_message_to_output(message, output_name)
-        assert iothub_pipeline.send_output_event.call_count == 1
-        assert iothub_pipeline.send_output_event.call_args[0][0] is message
+        assert mqtt_pipeline.send_output_event.call_count == 1
+        assert mqtt_pipeline.send_output_event.call_args[0][0] is message
         assert message.output_name == output_name
 
     @pytest.mark.it(
         "Waits for the completion of the 'send_output_event' pipeline operation before returning"
     )
     def test_waits_for_pipeline_op_completion(
-        self, mocker, client_manual_cb, iothub_pipeline_manual_cb, message
+        self, mocker, client_manual_cb, mqtt_pipeline_manual_cb, message
     ):
         self.add_event_completion_checks(
-            mocker=mocker, pipeline_function=iothub_pipeline_manual_cb.send_output_event
+            mocker=mocker, pipeline_function=mqtt_pipeline_manual_cb.send_output_event
         )
         output_name = "some_output"
         client_manual_cb.send_message_to_output(message, output_name)
@@ -2422,7 +2245,7 @@ class TestIoTHubModuleClientSendToOutput(IoTHubModuleClientTestsConfig, WaitsFor
         self,
         mocker,
         client_manual_cb,
-        iothub_pipeline_manual_cb,
+        mqtt_pipeline_manual_cb,
         message,
         pipeline_error,
         client_error,
@@ -2430,7 +2253,7 @@ class TestIoTHubModuleClientSendToOutput(IoTHubModuleClientTestsConfig, WaitsFor
         my_pipeline_error = pipeline_error()
         self.add_event_completion_checks(
             mocker=mocker,
-            pipeline_function=iothub_pipeline_manual_cb.send_output_event,
+            pipeline_function=mqtt_pipeline_manual_cb.send_output_event,
             kwargs={"error": my_pipeline_error},
         )
         output_name = "some_output"
@@ -2453,21 +2276,60 @@ class TestIoTHubModuleClientSendToOutput(IoTHubModuleClientTestsConfig, WaitsFor
         ],
     )
     def test_send_message_to_output_calls_pipeline_wraps_data_in_message(
-        self, client, iothub_pipeline, message_input
+        self, client, mqtt_pipeline, message_input
     ):
         output_name = "some_output"
         client.send_message_to_output(message_input, output_name)
-        assert iothub_pipeline.send_output_event.call_count == 1
-        sent_message = iothub_pipeline.send_output_event.call_args[0][0]
+        assert mqtt_pipeline.send_output_event.call_count == 1
+        sent_message = mqtt_pipeline.send_output_event.call_args[0][0]
         assert isinstance(sent_message, Message)
         assert sent_message.data == message_input
+
+    @pytest.mark.it("Raises error when message data size is greater than 256 KB")
+    def test_raises_error_when_message_to_output_data_greater_than_256(self, client, mqtt_pipeline):
+        output_name = "some_output"
+        data_input = "serpensortia" * 256000
+        message = Message(data_input)
+        with pytest.raises(ValueError) as e_info:
+            client.send_message_to_output(message, output_name)
+        assert "256 KB" in e_info.value.args[0]
+        assert mqtt_pipeline.send_output_event.call_count == 0
+
+    @pytest.mark.it("Raises error when message size is greater than 256 KB")
+    def test_raises_error_when_message_to_output_size_greater_than_256(self, client, mqtt_pipeline):
+        output_name = "some_output"
+        data_input = "serpensortia"
+        message = Message(data_input)
+        message.custom_properties["spell"] = data_input * 256000
+        with pytest.raises(ValueError) as e_info:
+            client.send_message_to_output(message, output_name)
+        assert "256 KB" in e_info.value.args[0]
+        assert mqtt_pipeline.send_output_event.call_count == 0
+
+    @pytest.mark.it("Does not raises error when message data size is equal to 256 KB")
+    def test_raises_error_when_message_to_output_data_equal_to_256(self, client, mqtt_pipeline):
+        output_name = "some_output"
+        data_input = "a" * 262095
+        message = Message(data_input)
+        # This check was put as message class may undergo the default content type encoding change
+        # and the above calculation will change.
+        # Had to do greater than check for python 2. Ideally should be not equal check
+        if message.get_size() > device_constant.TELEMETRY_MESSAGE_SIZE_LIMIT:
+            assert False
+
+        client.send_message_to_output(message, output_name)
+
+        assert mqtt_pipeline.send_output_event.call_count == 1
+        sent_message = mqtt_pipeline.send_output_event.call_args[0][0]
+        assert isinstance(sent_message, Message)
+        assert sent_message.data == data_input
 
 
 @pytest.mark.describe("IoTHubModuleClient (Synchronous) - .receive_message_on_input()")
 class TestIoTHubModuleClientReceiveInputMessage(IoTHubModuleClientTestsConfig):
     @pytest.mark.it("Implicitly enables input messaging feature if not already enabled")
     def test_enables_input_messaging_only_if_not_already_enabled(
-        self, mocker, client, iothub_pipeline
+        self, mocker, client, mqtt_pipeline
     ):
         mocker.patch.object(
             SyncClientInbox, "get"
@@ -2475,21 +2337,21 @@ class TestIoTHubModuleClientReceiveInputMessage(IoTHubModuleClientTestsConfig):
         input_name = "some_input"
 
         # Verify Input Messaging enabled if not enabled
-        iothub_pipeline.feature_enabled.__getitem__.return_value = (
+        mqtt_pipeline.feature_enabled.__getitem__.return_value = (
             False
         )  # Input Messages will appear disabled
         client.receive_message_on_input(input_name)
-        assert iothub_pipeline.enable_feature.call_count == 1
-        assert iothub_pipeline.enable_feature.call_args[0][0] == constant.INPUT_MSG
+        assert mqtt_pipeline.enable_feature.call_count == 1
+        assert mqtt_pipeline.enable_feature.call_args[0][0] == constant.INPUT_MSG
 
-        iothub_pipeline.enable_feature.reset_mock()
+        mqtt_pipeline.enable_feature.reset_mock()
 
         # Verify Input Messaging not enabled if already enabled
-        iothub_pipeline.feature_enabled.__getitem__.return_value = (
+        mqtt_pipeline.feature_enabled.__getitem__.return_value = (
             True
         )  # Input Messages will appear enabled
         client.receive_message_on_input(input_name)
-        assert iothub_pipeline.enable_feature.call_count == 0
+        assert mqtt_pipeline.enable_feature.call_count == 0
 
     @pytest.mark.it("Returns a message from the input inbox, if available")
     def test_returns_message_from_input_inbox(self, mocker, client, message):
