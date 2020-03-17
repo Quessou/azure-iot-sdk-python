@@ -8,9 +8,6 @@ import os
 import threading
 from six.moves import input
 from azure.iot.device import IoTHubDeviceClient
-import logging
-
-logging.basicConfig(level=logging.DEBUG)
 
 conn_str = os.getenv("IOTHUB_DEVICE_CONNECTION_STRING")
 device_client = IoTHubDeviceClient.create_from_connection_string(conn_str)
