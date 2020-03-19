@@ -48,7 +48,7 @@ class TestGetRegisterTopicForPublish(object):
         ],
     )
     def test_returns_topic(self, request_id, expected_topic):
-        topic = mqtt_topic_provisioning.get_register_topic_for_publish("PUT", request_id)
+        topic = mqtt_topic_provisioning.get_register_topic_for_publish(request_id)
         assert topic == expected_topic
 
     # NOTE: request_id should NEVER require URL encoding.
@@ -56,39 +56,87 @@ class TestGetRegisterTopicForPublish(object):
     # However, we encode them anyway for safety.
     # PLEASE NOTE THAT ALL OF THESE TEST CASES ARE INVALID AS A RESULT.
     @pytest.mark.it(
-        "URL encodes the registration id (even though any registration id needing URL encoding is invalid)"
+        "URL encodes the request id (even though any request id needing URL encoding is invalid)"
     )
     @pytest.mark.parametrize(
         "request_id, expected_topic",
         [
             # URL Encode
             pytest.param(
-                "request?id",
-                "$dps/registrations/PUT/iotdps-register/?$rid=request%3Fid",
+                "invalid/request?id",
+                "$dps/registrations/PUT/iotdps-register/?$rid=invalid%2Frequest%3Fid",
                 id="Regular URL Encoding",
             ),
             # URL Encode (+)
             pytest.param(
-                "request+id",
-                "$dps/registrations/PUT/iotdps-register/?$rid=request%2Bid",
+                "invalid+request+id",
+                "$dps/registrations/PUT/iotdps-register/?$rid=invalid%2Brequest%2Bid",
                 id="URL Encoding of '+' character",
             ),
         ],
     )
     def test_url_encoding(self, request_id, expected_topic):
-        topic = mqtt_topic_provisioning.get_register_topic_for_publish("PUT", request_id)
+        topic = mqtt_topic_provisioning.get_register_topic_for_publish(request_id)
         assert topic == expected_topic
 
 
 # # NOTE: While there is an ability to pivot on the the 'method' parameter of this function, the only
 # # valid cases are all using the "GET" method, so it is the only one under test.
 # # Consider removing this argument.
-# class TestGetQueryTopicForPublish(object):
-#     @pytest.mark.it("Returns the topic for publishing query requests to DPS")
-#     #@pytest.mark.parametrize("request_id, operation_id, expected_topic")
-#     def test_returns_topic(self):
-#         request_id = "3226c2f7-3d30-425c-b83b-0c34335f8220"
-#         operation_id = ""
+class TestGetQueryTopicForPublish(object):
+    @pytest.mark.it("Returns the topic for publishing query requests to DPS")
+    @pytest.mark.parametrize(
+        "request_id, operation_id, expected_topic",
+        [
+            # Realistic values
+            pytest.param(
+                "3226c2f7-3d30-425c-b83b-0c34335f8220",
+                "4.79f33f69d8eb3870.da2d9251-3097-43e9-b81c-782718485ce7",
+                "$dps/registrations/GET/iotdps-get-operationstatus/?$rid=3226c2f7-3d30-425c-b83b-0c34335f8220&operationId=4.79f33f69d8eb3870.da2d9251-3097-43e9-b81c-782718485ce7",
+                id="('3226c2f7-3d30-425c-b83b-0c34335f8220', '4.79f33f69d8eb3870.da2d9251-3097-43e9-b81c-782718485ce7') ==> '$dps/registrations/GET/iotdps-get-operationstatus/?$rid=3226c2f7-3d30-425c-b83b-0c34335f8220&operationId=4.79f33f69d8eb3870.da2d9251-3097-43e9-b81c-782718485ce7'",
+            ),
+            # Arbitrary values
+            pytest.param(
+                "1234",
+                "5678",
+                "$dps/registrations/GET/iotdps-get-operationstatus/?$rid=1234&operationId=5678",
+                id="('1234', '5678') ==> '$dps/registrations/GET/iotdps-get-operationstatus/?$rid=1234&operationId=5678'",
+            ),
+        ],
+    )
+    def test_returns_topic(self, request_id, operation_id, expected_topic):
+        topic = mqtt_topic_provisioning.get_query_topic_for_publish(request_id, operation_id)
+        assert topic == expected_topic
+
+    # NOTE: request_id and operation_id should NEVER require URL encoding.
+    # There are no valid values for which they would require to be URL encoded.
+    # However, we encode them anyway for safety.
+    # PLEASE NOTE THAT ALL OF THESE TEST CASES ARE INVALID AS A RESULT.
+    @pytest.mark.it(
+        "URL encodes the request id and operation id (even though values needing URL encoding are invalid)"
+    )
+    @pytest.mark.parametrize(
+        "request_id, operation_id, expected_topic",
+        [
+            # URL Encode
+            pytest.param(
+                "invalid/request?id",
+                "invalid?operation$id",
+                "$dps/registrations/GET/iotdps-get-operationstatus/?$rid=invalid%2Frequest%3Fid&operationId=invalid%3Foperation%24id",
+                id="Regular URL Encoding",
+            ),
+            # URL Encode (+)
+            pytest.param(
+                "invalid+request+id",
+                "invalid+operation+id",
+                "$dps/registrations/GET/iotdps-get-operationstatus/?$rid=invalid%2Brequest%2Bid&operationId=invalid%2Boperation%2Bid",
+                id="URL Encoding of '+' character",
+            ),
+        ],
+    )
+    def test_url_encoding(self, request_id, operation_id, expected_topic):
+        topic = mqtt_topic_provisioning.get_query_topic_for_publish(request_id, operation_id)
+        assert topic == expected_topic
 
 
 @pytest.mark.describe(".is_dps_response_topic()")

@@ -66,7 +66,7 @@ class ProvisioningMQTTTranslationStage(PipelineStage):
         elif isinstance(op, pipeline_ops_base.RequestOperation):
             if op.request_type == pipeline_constant.REGISTER:
                 topic = mqtt_topic_provisioning.get_register_topic_for_publish(
-                    method=op.method, request_id=op.request_id
+                    request_id=op.request_id
                 )
                 worker_op = op.spawn_worker_op(
                     worker_op_type=pipeline_ops_mqtt.MQTTPublishOperation,
@@ -76,9 +76,7 @@ class ProvisioningMQTTTranslationStage(PipelineStage):
                 self.send_op_down(worker_op)
             else:
                 topic = mqtt_topic_provisioning.get_query_topic_for_publish(
-                    method=op.method,
-                    request_id=op.request_id,
-                    operation_id=op.query_params["operation_id"],
+                    request_id=op.request_id, operation_id=op.query_params["operation_id"]
                 )
                 worker_op = op.spawn_worker_op(
                     worker_op_type=pipeline_ops_mqtt.MQTTPublishOperation,

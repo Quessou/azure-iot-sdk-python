@@ -25,26 +25,25 @@ def get_register_topic_for_subscribe():
     return _get_topic_base() + "res/#"
 
 
-def get_register_topic_for_publish(method, request_id):
+def get_register_topic_for_publish(request_id):
     """
     :return: The topic string used to send a registration. It is of the format
     "$dps/registrations/<method>/iotdps-register/?$rid=<request_id>
     """
-    return (_get_topic_base() + "{method}/iotdps-register/?$rid={request_id}").format(
-        method=method, request_id=urllib.parse.quote_plus(request_id)
+    return (_get_topic_base() + "PUT/iotdps-register/?$rid={request_id}").format(
+        request_id=urllib.parse.quote_plus(request_id)
     )
 
 
-def get_query_topic_for_publish(method, request_id, operation_id):
+def get_query_topic_for_publish(request_id, operation_id):
     """
     :return: The topic string used to send a query. It is of the format
     "$dps/registrations/<method>/iotdps-get-operationstatus/?$rid=<request_id>&operationId=<operation_id>
     """
     return (
         _get_topic_base()
-        + "{method}/iotdps-get-operationstatus/?$rid={request_id}&operationId={operation_id}"
+        + "GET/iotdps-get-operationstatus/?$rid={request_id}&operationId={operation_id}"
     ).format(
-        method=method,
         request_id=urllib.parse.quote_plus(request_id),
         operation_id=urllib.parse.quote_plus(operation_id),
     )
@@ -74,7 +73,7 @@ def extract_properties_from_dps_response_topic(topic):
     $dps/registrations/res/<statuscode>/?$<key1>=<value1>&<key2>=<value2>...&<keyN>=<valueN>
     Extract key=value pairs from the latter part of the topic.
     :param topic: The topic string
-    :return: a dictionary of property keys mapped to a list of property values.
+    :return: a dictionary of property keys mapped to property values.
     """
     topic_parts = topic.split("$")
     key_value_dict = urllib.parse.parse_qs(topic_parts[2])
