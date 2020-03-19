@@ -24,9 +24,6 @@ class TestGetRegisterTopicForSubscribe(object):
         assert topic == "$dps/registrations/res/#"
 
 
-# NOTE: While there is an ability to pivot on the the 'method' parameter of this function, the only
-# valid cases are all using the "PUT" method, so it is the only one under test.
-# Consider removing this argument.
 @pytest.mark.describe(".get_register_topic_for_publish()")
 class TestGetRegisterTopicForPublish(object):
     @pytest.mark.it("Returns the topic for publishing registration requests to DPS")
@@ -51,13 +48,10 @@ class TestGetRegisterTopicForPublish(object):
         topic = mqtt_topic_provisioning.get_register_topic_for_publish(request_id)
         assert topic == expected_topic
 
-    # NOTE: request_id should NEVER require URL encoding.
-    # There are no valid values for which it would require to be URL encoded.
-    # However, we encode them anyway for safety.
-    # PLEASE NOTE THAT ALL OF THESE TEST CASES ARE INVALID AS A RESULT.
-    @pytest.mark.it(
-        "URL encodes the request id (even though any request id needing URL encoding is invalid)"
-    )
+    # NOTE: request_id should not require URL encoding.
+    # No valid value would require URL encoding to be transmitted.
+    # However, we encode it anyway for safety.
+    @pytest.mark.it("URL encodes the request id")
     @pytest.mark.parametrize(
         "request_id, expected_topic",
         [
@@ -80,9 +74,6 @@ class TestGetRegisterTopicForPublish(object):
         assert topic == expected_topic
 
 
-# # NOTE: While there is an ability to pivot on the the 'method' parameter of this function, the only
-# # valid cases are all using the "GET" method, so it is the only one under test.
-# # Consider removing this argument.
 class TestGetQueryTopicForPublish(object):
     @pytest.mark.it("Returns the topic for publishing query requests to DPS")
     @pytest.mark.parametrize(
@@ -108,13 +99,10 @@ class TestGetQueryTopicForPublish(object):
         topic = mqtt_topic_provisioning.get_query_topic_for_publish(request_id, operation_id)
         assert topic == expected_topic
 
-    # NOTE: request_id and operation_id should NEVER require URL encoding.
-    # There are no valid values for which they would require to be URL encoded.
+    # NOTE: request_id and operation_id should not require URL encoding.
+    # No valid value would require URL encoding to be transmitted.
     # However, we encode them anyway for safety.
-    # PLEASE NOTE THAT ALL OF THESE TEST CASES ARE INVALID AS A RESULT.
-    @pytest.mark.it(
-        "URL encodes the request id and operation id (even though values needing URL encoding are invalid)"
-    )
+    @pytest.mark.it("URL encodes the request id and operation id")
     @pytest.mark.parametrize(
         "request_id, operation_id, expected_topic",
         [
@@ -215,6 +203,33 @@ class TestExtractPropertiesFromDpsResponseTopic(object):
         ],
     )
     def test_returns_properties(self, topic, expected_dict):
+        assert (
+            mqtt_topic_provisioning.extract_properties_from_dps_response_topic(topic)
+            == expected_dict
+        )
+
+    # NOTE: properties should not require URL decoding.
+    # No valid value would require URL encoding to be transmitted.
+    # However, we treat them as if they were encoded anyway for safety (and ease of use).
+    @pytest.mark.it("URL decodes properties extracted from the DPS response topic")
+    @pytest.mark.parametrize(
+        "topic, expected_dict",
+        [
+            # URL Decode
+            pytest.param(
+                "$dps/registrations/res/200/?$rid=request%3Fid",
+                {"rid": "request?id"},
+                id="Regular URL decoding",
+            ),
+            # URL Decode (+)
+            pytest.param(
+                "$dps/registrations/res/200/?$rid=request%2Bid",
+                {"rid": "request+id"},
+                id="Regular URL decoding",
+            ),
+        ],
+    )
+    def test_url_decode_properties(self, topic, expected_dict):
         assert (
             mqtt_topic_provisioning.extract_properties_from_dps_response_topic(topic)
             == expected_dict

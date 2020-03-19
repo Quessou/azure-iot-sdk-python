@@ -28,7 +28,7 @@ def get_register_topic_for_subscribe():
 def get_register_topic_for_publish(request_id):
     """
     :return: The topic string used to send a registration. It is of the format
-    "$dps/registrations/<method>/iotdps-register/?$rid=<request_id>
+    "$dps/registrations/PUT/iotdps-register/?$rid=<request_id>
     """
     return (_get_topic_base() + "PUT/iotdps-register/?$rid={request_id}").format(
         request_id=urllib.parse.quote_plus(request_id)
@@ -38,7 +38,7 @@ def get_register_topic_for_publish(request_id):
 def get_query_topic_for_publish(request_id, operation_id):
     """
     :return: The topic string used to send a query. It is of the format
-    "$dps/registrations/<method>/iotdps-get-operationstatus/?$rid=<request_id>&operationId=<operation_id>
+    "$dps/registrations/GET/iotdps-get-operationstatus/?$rid=<request_id>&operationId=<operation_id>
     """
     return (
         _get_topic_base()
