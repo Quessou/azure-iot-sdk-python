@@ -19,75 +19,80 @@ def _get_topic_base():
 
 def get_register_topic_for_subscribe():
     """
-    return the topic string used to subscribe for receiving future responses from DPS
+    :return: The topic string used to subscribe for receiving future responses from DPS.
+    It is of the format "$dps/registrations/res/#"
     """
     return _get_topic_base() + "res/#"
 
 
 def get_register_topic_for_publish(method, request_id):
     """
-    return the topic string used to publish telemetry
+    :return: The topic string used to send a registration. It is of the format
+    "$dps/registrations/<method>/iotdps-register/?$rid=<request_id>
     """
     return (_get_topic_base() + "{method}/iotdps-register/?$rid={request_id}").format(
-        method=method, request_id=request_id
+        method=method, request_id=urllib.parse.quote_plus(request_id)
     )
 
 
 def get_query_topic_for_publish(method, request_id, operation_id):
     """
-    :return: The topic for cloud to device messages.It is of the format
-    "devices/<deviceid>/messages/devicebound/#"
+    :return: The topic string used to send a query. It is of the format
+    "$dps/registrations/<method>/iotdps-get-operationstatus/?$rid=<request_id>&operationId=<operation_id>
     """
     return (
         _get_topic_base()
         + "{method}/iotdps-get-operationstatus/?$rid={request_id}&operationId={operation_id}"
-    ).format(method=method, request_id=request_id, operation_id=operation_id)
+    ).format(
+        method=method,
+        request_id=urllib.parse.quote_plus(request_id),
+        operation_id=urllib.parse.quote_plus(operation_id),
+    )
 
 
-# TODO: Should this even exist? It's only used here
-def get_topic_for_response():
+def _get_topic_for_response():
     """
     return the topic string used to publish telemetry
     """
     return _get_topic_base() + "res/"
 
 
-def is_query_topic(topic):
-    if "GET/iotdps-get-operationstatus" in topic:
-        return True
-    return False
-
-
 def is_dps_response_topic(topic):
     """
     Topics for responses from DPS are of the following format:
-    $dps/registrations/res/<statuscode>/?$<key1>=<value1>&<key2>=<value2>&<key3>=<value3>
+    $dps/registrations/res/<statuscode>/?$<key1>=<value1>&<key2>=<value2>...&<keyN>=<valueN>
     :param topic: The topic string
     """
-    if get_topic_for_response() in topic:
+    if _get_topic_for_response() in topic:
         return True
     return False
 
 
-def extract_properties_from_topic(topic):
+def extract_properties_from_dps_response_topic(topic):
     """
     Topics for responses from DPS are of the following format:
-    $dps/registrations/res/<statuscode>/?$<key1>=<value1>&<key2>=<value2>&<key3>=<value3>
+    $dps/registrations/res/<statuscode>/?$<key1>=<value1>&<key2>=<value2>...&<keyN>=<valueN>
     Extract key=value pairs from the latter part of the topic.
     :param topic: The topic string
-    :return key_values_dict : a dictionary of key mapped to a list of values.
+    :return: a dictionary of property keys mapped to a list of property values.
     """
     topic_parts = topic.split("$")
     key_value_dict = urllib.parse.parse_qs(topic_parts[2])
+    for k, v in key_value_dict.items():
+        if len(v) > 1:
+            raise ValueError("Duplicate keys in DPS response topic")
+        else:
+            key_value_dict[k] = v[0]
     return key_value_dict
 
 
-def extract_status_code_from_topic(topic):
+def extract_status_code_from_dps_response_topic(topic):
     """
     Topics for responses from DPS are of the following format:
-    $dps/registrations/res/<statuscode>/?$<key1>=<value1>&<key2>=<value2>&<key3>=<value3>
+    $dps/registrations/res/<statuscode>/?$<key1>=<value1>&<key2>=<value2>...&<keyN>=<valueN>
     Extract the status code part from the topic.
     :param topic: The topic string
+    :return: The status code from the DPS response topic, as a string
     """
     POS_STATUS_CODE_IN_TOPIC = 3
     topic_parts = topic.split("$")

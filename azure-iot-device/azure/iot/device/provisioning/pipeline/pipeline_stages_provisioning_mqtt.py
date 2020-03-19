@@ -122,12 +122,14 @@ class ProvisioningMQTTTranslationStage(PipelineStage):
                         payload=event.payload, topic=topic
                     )
                 )
-                key_values = mqtt_topic_provisioning.extract_properties_from_topic(topic)
-                retry_after = mqtt_topic_provisioning.get_optional_element(
-                    key_values, "retry-after", 0
+                key_values = mqtt_topic_provisioning.extract_properties_from_dps_response_topic(
+                    topic
                 )
-                status_code = mqtt_topic_provisioning.extract_status_code_from_topic(topic)
-                request_id = key_values["rid"][0]
+                retry_after = key_values.get("retry-after", None)
+                status_code = mqtt_topic_provisioning.extract_status_code_from_dps_response_topic(
+                    topic
+                )
+                request_id = key_values["rid"]
 
                 self.send_event_up(
                     pipeline_events_base.ResponseEvent(

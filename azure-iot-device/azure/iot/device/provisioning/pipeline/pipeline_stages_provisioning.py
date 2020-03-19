@@ -18,7 +18,7 @@ import weakref
 import json
 from threading import Timer
 import time
-from .mqtt_topic import get_optional_element
+from .mqtt_topic_provisioning import get_optional_element
 
 logger = logging.getLogger(__name__)
 
@@ -96,10 +96,18 @@ class CommonProvisioningStage(PipelineStage):
         """
         Create the registration result from the complete decoded json response for details regarding the registration process.
         """
+        # decoded_state = decoded_response.get("registrationState", None)
         decoded_state = get_optional_element(decoded_response, "registrationState")
         registration_state = None
         if decoded_state is not None:
             registration_state = RegistrationState(
+                # device_id=decoded_state.get("deviceId", None),
+                # assigned_hub=decoded_state.get("assignedHub", None),
+                # sub_status=decoded_state.get("substatus", None),
+                # created_date_time=decoded_state.get("createdDateTimeUtc", None),
+                # last_update_date_time=decoded_state.get("lastUpdatedDateTimeUtc", None),
+                # etag=decoded_state.get("etag", None),
+                # payload=decoded_state.get("payload", None),
                 device_id=get_optional_element(decoded_state, "deviceId"),
                 assigned_hub=get_optional_element(decoded_state, "assignedHub"),
                 sub_status=get_optional_element(decoded_state, "substatus"),
