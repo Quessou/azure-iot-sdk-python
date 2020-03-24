@@ -9,6 +9,13 @@ import six.moves.urllib as urllib
 
 logger = logging.getLogger(__name__)
 
+# NOTE: Whenever using standard URL encoding via the urllib.parse.quote() API
+# make sure to specify that there are NO safe values (e.g. safe=""). By default
+# "/" is skipped in encoding, and that is not desirable.
+#
+# DO NOT use urllib.parse.quote_plus(), as it turns ' ' characters into '+',
+# which is invalid for MQTT publishes.
+
 
 def _get_topic_base():
     """
