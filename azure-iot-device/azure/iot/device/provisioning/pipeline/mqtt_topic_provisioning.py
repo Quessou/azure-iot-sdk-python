@@ -1,4 +1,4 @@
-# --------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License. See License.txt in the project root for
 # license information.
@@ -31,7 +31,7 @@ def get_register_topic_for_publish(request_id):
     "$dps/registrations/PUT/iotdps-register/?$rid=<request_id>
     """
     return (_get_topic_base() + "PUT/iotdps-register/?$rid={request_id}").format(
-        request_id=urllib.parse.quote_plus(request_id)
+        request_id=urllib.parse.quote(request_id, safe="")
     )
 
 
@@ -44,8 +44,8 @@ def get_query_topic_for_publish(request_id, operation_id):
         _get_topic_base()
         + "GET/iotdps-get-operationstatus/?$rid={request_id}&operationId={operation_id}"
     ).format(
-        request_id=urllib.parse.quote_plus(request_id),
-        operation_id=urllib.parse.quote_plus(operation_id),
+        request_id=urllib.parse.quote(request_id, safe=""),
+        operation_id=urllib.parse.quote(operation_id, safe=""),
     )
 
 

@@ -196,9 +196,7 @@ class IoTHubMQTTTranslationStage(PipelineStage):
             device_id, module_id
         )
         self.feature_to_topic = {
-            pipeline_constant.C2D_MSG: (
-                mqtt_topic_iothub.get_c2d_topic_for_subscribe(device_id, module_id)
-            ),
+            pipeline_constant.C2D_MSG: (mqtt_topic_iothub.get_c2d_topic_for_subscribe(device_id)),
             pipeline_constant.INPUT_MSG: (
                 mqtt_topic_iothub.get_input_topic_for_subscribe(device_id, module_id)
             ),

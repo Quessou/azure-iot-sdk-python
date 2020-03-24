@@ -10,30 +10,29 @@ import six.moves.urllib as urllib
 
 logger = logging.getLogger(__name__)
 
+# NOTE: Whenever using standard URL encoding via the urllib.parse.quote() API
+# make sure to specify that there are NO safe values (e.g. safe=""). By default
+# "/" is skipped in encoding, and that is not desirable.
 
-def _get_topic_base(device_id, module_id):
+
+def _get_topic_base(device_id, module_id=None):
     """
     return the string that is at the beginning of all topics for this
     device/module
     """
 
+    topic = "devices/" + urllib.parse.quote(device_id, safe="")
     if module_id:
-        return (
-            "devices/"
-            + urllib.parse.quote_plus(device_id)
-            + "/modules/"
-            + urllib.parse.quote_plus(module_id)
-        )
-    else:
-        return "devices/" + urllib.parse.quote_plus(device_id)
+        topic = topic + "/modules/" + urllib.parse.quote(module_id, safe="")
+    return topic
 
 
-def get_c2d_topic_for_subscribe(device_id, module_id):
+def get_c2d_topic_for_subscribe(device_id):
     """
     :return: The topic for cloud to device messages.It is of the format
     "devices/<deviceid>/messages/devicebound/#"
     """
-    return _get_topic_base(device_id, module_id) + "/messages/devicebound/#"
+    return _get_topic_base(device_id) + "/messages/devicebound/#"
 
 
 def get_input_topic_for_subscribe(device_id, module_id):
@@ -83,12 +82,14 @@ def get_method_topic_for_publish(request_id, status):
     Note that all inputs MUST be strings (not ints!)
     """
     return "$iothub/methods/res/{status}/?$rid={request_id}".format(
-        status=urllib.parse.quote_plus(status), request_id=urllib.parse.quote_plus(request_id)
+        status=urllib.parse.quote(status, safe=""),
+        request_id=urllib.parse.quote(request_id, safe=""),
     )
 
 
-# TODO: Consider splitting this into separate logic for Twin Requests / Twin Patches
+# NOTE: Consider splitting this into separate logic for Twin Requests / Twin Patches
 # This is the only method that is shared. Would probably simplify code if it was split.
+# Please consider refactoring.
 def get_twin_topic_for_publish(method, resource_location, request_id):
     """
     :return: The topic for publishing twin requests / patches. It is of the format
@@ -99,7 +100,7 @@ def get_twin_topic_for_publish(method, resource_location, request_id):
     return "$iothub/twin/{method}{resource_location}?$rid={request_id}".format(
         method=method,
         resource_location=resource_location,
-        request_id=urllib.parse.quote_plus(request_id),
+        request_id=urllib.parse.quote(request_id, safe=""),
     )
 
 
@@ -109,7 +110,7 @@ def is_c2d_topic(topic, device_id):
     devices/<deviceId>/messages/devicebound
     :param topic: The topic string
     """
-    if "devices/{}/messages/devicebound".format(urllib.parse.quote_plus(device_id)) in topic:
+    if "devices/{}/messages/devicebound".format(urllib.parse.quote(device_id, safe="")) in topic:
         return True
     return False
 
@@ -120,7 +121,12 @@ def is_input_topic(topic, device_id, module_id):
     devices/<deviceId>/modules/<moduleId>/inputs/<inputName>
     :param topic: The topic string
     """
-    if "devices/{}/modules/{}/inputs/".format(device_id, module_id) in topic:
+    if (
+        "devices/{}/modules/{}/inputs/".format(
+            urllib.parse.quote(device_id, safe=""), urllib.parse.quote(module_id, safe="")
+        )
+        in topic
+    ):
         return True
     return False
 
@@ -165,7 +171,7 @@ def get_input_name_from_topic(topic):
     """
     parts = topic.split("/")
     if len(parts) > 5 and parts[4] == "inputs":
-        return parts[5]
+        return urllib.parse.unquote(parts[5])
     else:
         raise ValueError("topic has incorrect format")
 
@@ -180,12 +186,11 @@ def get_method_name_from_topic(topic):
     """
     parts = topic.split("/")
     if is_method_topic(topic) and len(parts) >= 4:
-        return parts[3]
+        return urllib.parse.unquote(parts[3])
     else:
         raise ValueError("topic has incorrect format")
 
 
-# CT-TODO: URL decode request id for safety
 def get_method_request_id_from_topic(topic):
     """
     Extract the Request ID (RID) from the method topic.
@@ -248,11 +253,13 @@ def extract_message_properties_from_topic(topic, message_received):
     """
 
     parts = topic.split("/")
+    # Input Message Topic
     if len(parts) > 4 and parts[4] == "inputs":
         if len(parts) > 6:
             properties = parts[6]
         else:
             properties = None
+    # C2D Message Topic
     elif len(parts) > 3 and parts[3] == "devicebound":
         if len(parts) > 4:
             properties = parts[4]
@@ -266,8 +273,8 @@ def extract_message_properties_from_topic(topic, message_received):
 
         for entry in key_value_pairs:
             pair = entry.split("=")
-            key = urllib.parse.unquote_plus(pair[0])
-            value = urllib.parse.unquote_plus(pair[1])
+            key = urllib.parse.unquote(pair[0])
+            value = urllib.parse.unquote(pair[1])
 
             if key == "$.mid":
                 message_received.message_id = value
@@ -331,13 +338,17 @@ def encode_message_properties_in_topic(message_to_send, topic):
             )
         )
 
-    system_properties_encoded = urllib.parse.urlencode(system_properties)
+    system_properties_encoded = urllib.parse.urlencode(
+        system_properties, quote_via=urllib.parse.quote
+    )
     topic += system_properties_encoded
 
     if message_to_send.custom_properties and len(message_to_send.custom_properties) > 0:
         if system_properties and len(system_properties) > 0:
             topic += "&"
-        user_properties_encoded = urllib.parse.urlencode(message_to_send.custom_properties)
+        user_properties_encoded = urllib.parse.urlencode(
+            message_to_send.custom_properties, quote_via=urllib.parse.quote
+        )
         topic += user_properties_encoded
 
     return topic
@@ -345,15 +356,15 @@ def encode_message_properties_in_topic(message_to_send, topic):
 
 def _extract_properties(properties_str):
     """Return a dictionary of properties from a string in the format
-    ${key1}={value1}&${key2}={value2}&...{keyn}={valuen}
+    ${key1}={value1}&${key2}={value2}...&${keyn}={valuen}
     """
     d = {}
     kv_pairs = properties_str.split("&")
 
     for entry in kv_pairs:
         pair = entry.split("=")
-        key = urllib.parse.unquote_plus(pair[0]).lstrip("$")
-        value = urllib.parse.unquote_plus(pair[1])
+        key = urllib.parse.unquote(pair[0]).lstrip("$")
+        value = urllib.parse.unquote(pair[1])
         d[key] = value
 
     return d
