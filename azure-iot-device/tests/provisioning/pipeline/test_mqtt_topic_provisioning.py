@@ -195,17 +195,20 @@ class TestExtractPropertiesFromDpsResponseTopic(object):
     @pytest.mark.parametrize(
         "topic, expected_dict",
         [
-            # URL Decode
             pytest.param(
                 "$dps/registrations/res/200/?$rid=request%3Fid",
                 {"rid": "request?id"},
                 id="Standard URL decoding",
             ),
-            # URL Decode (+)
             pytest.param(
-                "$dps/registrations/res/200/?$rid=request%2Bid",
-                {"rid": "request+id"},
-                id="Standard URL decoding",
+                "$dps/registrations/res/200/?$rid=request%20id",
+                {"rid": "request id"},
+                id="URL decoding of ' ' character",
+            ),
+            pytest.param(
+                "$dps/registrations/res/200/?$rid=request%2Fid",
+                {"rid": "request/id"},
+                id="URL decoding of '/' character",
             ),
         ],
     )
