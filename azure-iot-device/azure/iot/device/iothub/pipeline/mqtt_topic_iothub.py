@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 #
 # DO NOT use urllib.parse.quote_plus(), as it turns ' ' characters into '+',
 # which is invalid for MQTT publishes.
+#
+# DO NOT use urllib.parse.unquote_plus(). as it turns '+' characters into ' ',
+# which is invalid.
 
 
 def _get_topic_base(device_id, module_id=None):
@@ -271,6 +274,9 @@ def extract_message_properties_from_topic(topic, message_received):
     else:
         raise ValueError("topic has incorrect format")
 
+    # We do not want to extract values corresponding to these keys
+    ignored_extraction_values = ["iothub-ack"]
+
     if properties:
         key_value_pairs = properties.split("&")
 
@@ -279,18 +285,22 @@ def extract_message_properties_from_topic(topic, message_received):
             key = urllib.parse.unquote(pair[0])
             value = urllib.parse.unquote(pair[1])
 
-            if key == "$.mid":
+            if key in ignored_extraction_values:
+                continue
+            elif key == "$.mid":
                 message_received.message_id = value
+            elif key == "$.to":
+                message_received.to = value
             elif key == "$.cid":
                 message_received.correlation_id = value
             elif key == "$.uid":
                 message_received.user_id = value
-            elif key == "$.to":
-                message_received.to = value
             elif key == "$.ct":
                 message_received.content_type = value
             elif key == "$.ce":
                 message_received.content_encoding = value
+            elif key == "$.exp":
+                message_received.expiry_time_utc = value
             else:
                 message_received.custom_properties[key] = value
 
