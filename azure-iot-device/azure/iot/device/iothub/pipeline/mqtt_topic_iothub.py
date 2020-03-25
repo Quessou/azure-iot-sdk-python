@@ -127,6 +127,8 @@ def is_input_topic(topic, device_id, module_id):
     devices/<deviceId>/modules/<moduleId>/inputs/<inputName>
     :param topic: The topic string
     """
+    if not device_id or not module_id:
+        return False
     if (
         "devices/{}/modules/{}/inputs/".format(
             urllib.parse.quote(device_id, safe=""), urllib.parse.quote(module_id, safe="")
@@ -275,7 +277,7 @@ def extract_message_properties_from_topic(topic, message_received):
         raise ValueError("topic has incorrect format")
 
     # We do not want to extract values corresponding to these keys
-    ignored_extraction_values = ["iothub-ack"]
+    ignored_extraction_values = ["iothub-ack", "$.to"]
 
     if properties:
         key_value_pairs = properties.split("&")
@@ -289,8 +291,6 @@ def extract_message_properties_from_topic(topic, message_received):
                 continue
             elif key == "$.mid":
                 message_received.message_id = value
-            elif key == "$.to":
-                message_received.to = value
             elif key == "$.cid":
                 message_received.correlation_id = value
             elif key == "$.uid":
@@ -328,9 +328,6 @@ def encode_message_properties_in_topic(message_to_send, topic):
 
     if message_to_send.user_id:
         system_properties.append(("$.uid", message_to_send.user_id))
-
-    if message_to_send.to:
-        system_properties.append(("$.to", message_to_send.to))
 
     if message_to_send.content_type:
         system_properties.append(("$.ct", message_to_send.content_type))

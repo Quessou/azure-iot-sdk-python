@@ -6,6 +6,7 @@
 
 import pytest
 import logging
+import datetime
 from azure.iot.device.iothub.pipeline import mqtt_topic_iothub
 from azure.iot.device import Message
 
@@ -19,7 +20,7 @@ logging.basicConfig(level=logging.DEBUG)
 # For URL decoding, we must always test the '+' character speicifically, in addition to
 # a generic URL encoding value (e.g. $, #, etc.)
 #
-# PLEASE DO THESE TESTS FOR EVEN CASES WHERE THOSE CHARACTERS SHOULD NOT OCCUR FOR SAFETY.
+# PLEASE DO THESE TESTS FOR EVEN CASES WHERE THOSE CHARACTERS SHOULD NOT OCCUR, FOR SAFETY.
 
 
 @pytest.mark.describe(".get_c2d_topic_for_subscribe()")
@@ -449,6 +450,8 @@ class TestIsInputTopic(object):
             pytest.param(
                 "VERY_fake_device", "VERY_fake_module", id="Non-matching device_id AND module_id"
             ),
+            pytest.param(None, "fake_module", id="No device_id"),
+            pytest.param("fake_device", None, id="No module_id"),
         ],
     )
     def test_is_input_topic_but_wrong_id(self, device_id, module_id):
@@ -502,16 +505,24 @@ class TestIsTwinResponseTopic(object):
         assert not mqtt_topic_iothub.is_twin_response_topic(topic)
 
 
-# TODO: THESE TESTS
 @pytest.mark.describe(".is_twin_desired_property_patch_topic()")
 class TestIsTwinDesiredPropertyPatchTopic(object):
     @pytest.mark.it("Returns True if the provided topic is a desired property patch topic")
     def test_is_desired_property_patch_topic(self):
-        pass
+        topic = "$iothub/twin/PATCH/properties/desired/?$version=1"
+        assert mqtt_topic_iothub.is_twin_desired_property_patch_topic(topic)
 
     @pytest.mark.it("Returns False if the provided topic is not a desired property patch topic")
-    def test_is_not_desired_property_patch_topic(self):
-        pass
+    @pytest.mark.parametrize(
+        "topic",
+        [
+            pytest.param("not a topic", id="Not a topic"),
+            pytest.param("$iothub/methods/POST/fake_method/?$rid=1", id="Topic of wrong type"),
+            pytest.param("$iothub/twin/PATCH/properties/dsiered/?$version=1", id="Malformed topic"),
+        ],
+    )
+    def test_is_not_desired_property_patch_topic(self, topic):
+        assert not mqtt_topic_iothub.is_twin_desired_property_patch_topic(topic)
 
 
 # NOTE: The tests in this class don't use entirely realisitic topic strings, as they do not
@@ -724,7 +735,6 @@ class TestExtractMessagePropertiesFromTopic(object):
         mqtt_topic_iothub.extract_message_properties_from_topic(topic, msg)
 
         # Validate MANDATORY system properties
-        assert msg.to == expected_system_properties["to"]
         assert msg.message_id == expected_system_properties["mid"]
 
         # Validate OPTIONAL system properties
@@ -761,7 +771,6 @@ class TestExtractMessagePropertiesFromTopic(object):
         mqtt_topic_iothub.extract_message_properties_from_topic(topic, msg)
 
         # Validate MANDATORY system properties
-        assert msg.to == expected_system_properties["to"]
         assert msg.message_id == expected_system_properties["mid"]
 
         # Validate OPTIONAL system properties
@@ -812,3 +821,149 @@ class TestExtractMessagePropertiesFromTopic(object):
         msg = Message("fake message")
         with pytest.raises(ValueError):
             mqtt_topic_iothub.extract_message_properties_from_topic(topic, msg)
+
+
+@pytest.mark.describe(".encode_message_properties_in_topic()")
+class TestEncodeMessagePropertiesInTopic(object):
+    def create_message(self, system_properties, custom_properties):
+        m = Message("payload")
+        m.message_id = system_properties.get("mid")
+        m.correlation_id = system_properties.get("cid")
+        m.user_id = system_properties.get("uid")
+        m.output_name = system_properties.get("on")
+        m.content_encoding = system_properties.get("ce")
+        m.content_type = system_properties.get("ct")
+        m.expiry_time_utc = system_properties.get("exp")
+        if system_properties.get("ifid"):
+            m.set_as_security_message()
+        m.custom_properties = custom_properties
+        return m
+
+    @pytest.fixture(params=["C2D Message", "Input Message"])
+    def message_topic(self, request):
+        if request.param == "C2D Message":
+            return "devices/fake_device/messages/events/"
+        else:
+            return "devices/fake_device/modules/fake_module/messages/events/"
+
+    @pytest.mark.it(
+        "Returns a new version of the given topic string that contains message properties from the given message"
+    )
+    @pytest.mark.parametrize(
+        "message_system_properties, message_custom_properties, expected_encoding",
+        [
+            pytest.param({}, {}, "", id="No properties"),
+            pytest.param(
+                {"mid": "1234", "ce": "utf-8"},
+                {},
+                "%24.mid=1234&%24.ce=utf-8",
+                id="Some System Properties",
+            ),
+            pytest.param(
+                {
+                    "mid": "1234",
+                    "cid": "5678",
+                    "uid": "userid",
+                    "on": "output",
+                    "ce": "utf-8",
+                    "ct": "type",
+                    "exp": datetime.datetime(2019, 2, 2),
+                    "ifid": True,
+                },
+                {},
+                "%24.on=output&%24.mid=1234&%24.cid=5678&%24.uid=userid&%24.ct=type&%24.ce=utf-8&%24.ifid=urn%3Aazureiot%3ASecurity%3ASecurityAgent%3A1&%24.exp=2019-02-02T00%3A00%3A00",
+                id="All System Properties",
+            ),
+            pytest.param(
+                {},
+                {"custom1": "value1", "custom2": "value2", "custom3": "value3"},
+                "custom1=value1&custom2=value2&custom3=value3",
+                id="Custom Properties ONLY",
+            ),
+            pytest.param(
+                {
+                    "mid": "1234",
+                    "cid": "5678",
+                    "uid": "userid",
+                    "on": "output",
+                    "ce": "utf-8",
+                    "ct": "type",
+                    "exp": datetime.datetime(2019, 2, 2),
+                    "ifid": True,
+                },
+                {"custom1": "value1", "custom2": "value2", "custom3": "value3"},
+                "%24.on=output&%24.mid=1234&%24.cid=5678&%24.uid=userid&%24.ct=type&%24.ce=utf-8&%24.ifid=urn%3Aazureiot%3ASecurity%3ASecurityAgent%3A1&%24.exp=2019-02-02T00%3A00%3A00&custom1=value1&custom2=value2&custom3=value3",
+                id="System Properties AND Custom Properties",
+            ),
+        ],
+    )
+    def test_encodes_properties(
+        self, message_topic, message_system_properties, message_custom_properties, expected_encoding
+    ):
+        message = self.create_message(message_system_properties, message_custom_properties)
+        encoded_topic = mqtt_topic_iothub.encode_message_properties_in_topic(message, message_topic)
+
+        assert encoded_topic.startswith(message_topic)
+        encoding = encoded_topic.split(message_topic)[1]
+        assert encoding == expected_encoding
+
+    @pytest.mark.it("URL encodes message properties when adding them to the topic")
+    @pytest.mark.parametrize(
+        "message_system_properties, message_custom_properties, expected_encoding",
+        [
+            pytest.param(
+                {
+                    "mid": "message#id",
+                    "cid": "correlation#id",
+                    "uid": "user#id",
+                    "on": "some#output",
+                    "ce": "utf-#",
+                    "ct": "fake#type",
+                    "exp": datetime.datetime(2019, 2, 2),
+                    "ifid": True,
+                },
+                {"custom#1": "value#1", "custom#2": "value#2", "custom#3": "value#3"},
+                "%24.on=some%23output&%24.mid=message%23id&%24.cid=correlation%23id&%24.uid=user%23id&%24.ct=fake%23type&%24.ce=utf-%23&%24.ifid=urn%3Aazureiot%3ASecurity%3ASecurityAgent%3A1&%24.exp=2019-02-02T00%3A00%3A00&custom%231=value%231&custom%232=value%232&custom%233=value%233",
+                id="Standard URL Encoding",
+            ),
+            pytest.param(
+                {
+                    "mid": "message id",
+                    "cid": "correlation id",
+                    "uid": "user id",
+                    "on": "some output",
+                    "ce": "utf- ",
+                    "ct": "fake type",
+                    "exp": datetime.datetime(2019, 2, 2),
+                    "ifid": True,
+                },
+                {"custom 1": "value 1", "custom 2": "value 2", "custom 3": "value 3"},
+                "%24.on=some%20output&%24.mid=message%20id&%24.cid=correlation%20id&%24.uid=user%20id&%24.ct=fake%20type&%24.ce=utf-%20&%24.ifid=urn%3Aazureiot%3ASecurity%3ASecurityAgent%3A1&%24.exp=2019-02-02T00%3A00%3A00&custom%201=value%201&custom%202=value%202&custom%203=value%203",
+                id="URL Encoding of ' ' character",
+            ),
+            pytest.param(
+                {
+                    "mid": "message/id",
+                    "cid": "correlation/id",
+                    "uid": "user/id",
+                    "on": "some/output",
+                    "ce": "utf-/",
+                    "ct": "fake/type",
+                    "exp": datetime.datetime(2019, 2, 2),
+                    "ifid": True,
+                },
+                {"custom/1": "value/1", "custom/2": "value/2", "custom/3": "value/3"},
+                "%24.on=some%2Foutput&%24.mid=message%2Fid&%24.cid=correlation%2Fid&%24.uid=user%2Fid&%24.ct=fake%2Ftype&%24.ce=utf-%2F&%24.ifid=urn%3Aazureiot%3ASecurity%3ASecurityAgent%3A1&%24.exp=2019-02-02T00%3A00%3A00&custom%2F1=value%2F1&custom%2F2=value%2F2&custom%2F3=value%2F3",
+                id="URL Encoding of '/' character",
+            ),
+        ],
+    )
+    def test_url_encodes(
+        self, message_topic, message_system_properties, message_custom_properties, expected_encoding
+    ):
+        message = self.create_message(message_system_properties, message_custom_properties)
+        encoded_topic = mqtt_topic_iothub.encode_message_properties_in_topic(message, message_topic)
+
+        assert encoded_topic.startswith(message_topic)
+        encoding = encoded_topic.split(message_topic)[1]
+        assert encoding == expected_encoding

@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.DEBUG)
 # the same way. We must always test the ' ' and '/' characters specifically, in addition
 # to a generic URL encoding value (e.g. $, #, etc.)
 #
-# PLEASE DO THESE TESTS FOR EVEN CASES WHERE THOSE CHARACTERS SHOULD NOT OCCUR FOR SAFETY.
+# PLEASE DO THESE TESTS FOR EVEN CASES WHERE THOSE CHARACTERS SHOULD NOT OCCUR, FOR SAFETY.
 
 
 @pytest.mark.describe(".get_register_topic_for_subscribe()")
