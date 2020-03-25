@@ -48,7 +48,7 @@ class ProvisioningMQTTTranslationStage(PipelineStage):
             username = "{id_scope}/registrations/{registration_id}/{query_params}".format(
                 id_scope=op.id_scope,
                 registration_id=op.registration_id,
-                query_params=urllib.parse.urlencode(query_param_seq),
+                query_params=urllib.parse.urlencode(query_param_seq, quote_via=urllib.parse.quote),
             )
 
             hostname = op.provisioning_host
