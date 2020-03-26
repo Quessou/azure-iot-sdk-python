@@ -313,7 +313,7 @@ class TestIsC2DTopic(object):
         "Returns True if the provided topic is a C2D topic and matches the provided device id"
     )
     def test_is_c2d_topic(self):
-        topic = "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2FdeviceBound&iothub-ack=full"
+        topic = "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2Fdevicebound"
         device_id = "fake_device"
         assert mqtt_topic_iothub.is_c2d_topic(topic, device_id)
 
@@ -322,12 +322,12 @@ class TestIsC2DTopic(object):
         "topic, device_id",
         [
             pytest.param(
-                "devices/fake%3Fdevice/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake%3Fdevice%2Fmessages%2FdeviceBound&iothub-ack=full",
+                "devices/fake%3Fdevice/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake%3Fdevice%2Fmessages%2Fdevicebound",
                 "fake?device",
                 id="Standard URL encoding required for device_id",
             ),
             pytest.param(
-                "devices/fake%20device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake%20device%2Fmessages%2FdeviceBound&iothub-ack=full",
+                "devices/fake%20device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake%20device%2Fmessages%2Fdevicebound",
                 "fake device",
                 id="URL encoding of ' ' character required for device_id",
             ),
@@ -336,7 +336,7 @@ class TestIsC2DTopic(object):
             # system properties would cause the system properties to not be able to be decoded correctly. But, like many tests
             # this is just for completeness, safety, and consistency.
             pytest.param(
-                "devices/fake%2Fdevice/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake%2Fdevice%2Fmessages%2FdeviceBound&iothub-ack=full",
+                "devices/fake%2Fdevice/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake%2Fdevice%2Fmessages%2Fdevicebound",
                 "fake/device",
                 id="URL encoding of '/' character required for device_id",
             ),
@@ -351,12 +351,12 @@ class TestIsC2DTopic(object):
         [
             pytest.param("not a topic", "fake_device", id="Not a topic"),
             pytest.param(
-                "devices/fake_device/modules/fake_module/inputs/fake_input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2FdeviceBound&iothub-ack=full",
+                "devices/fake_device/modules/fake_module/inputs/fake_input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2Fdevicebound",
                 "fake_device",
                 id="Topic of wrong type",
             ),
             pytest.param(
-                "devices/fake_device/msgs/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2FdeviceBound&iothub-ack=full",
+                "devices/fake_device/msgs/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2Fdevicebound",
                 "fake_device",
                 id="Malformed topic",
             ),
@@ -369,23 +369,18 @@ class TestIsC2DTopic(object):
         "Returns False if the provided topic is a C2D topic, but does not match the provided device id"
     )
     def test_is_c2d_topic_but_wrong_device_id(self):
-        topic = "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2FdeviceBound&iothub-ack=full"
+        topic = "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2Fdevicebound"
         device_id = "VERY_fake_device"
         assert not mqtt_topic_iothub.is_c2d_topic(topic, device_id)
 
 
-# NOTE: The tests in this class don't use entirely realisitic topic strings, as they do not
-# contain a message. However, this doesn't affect the tests themselves, because the implementation
-# does not look at that part. Still, perhaps it would be wise to enhance these topic strings used.
-# (Finding a realistic topic string for input messages requires setting up and debugging through
-# an Edge scenario)
 @pytest.mark.describe(".is_input_topic()")
 class TestIsInputTopic(object):
     @pytest.mark.it(
         "Returns True if the provided topic is an input topic and matches the provided device id and module id"
     )
     def test_is_input_topic(self):
-        topic = "devices/fake_device/modules/fake_module/inputs/"
+        topic = "devices/fake_device/modules/fake_module/inputs/fake_input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmodules%2Ffake_module%2Finputs%2Ffake_input"
         device_id = "fake_device"
         module_id = "fake_module"
         assert mqtt_topic_iothub.is_input_topic(topic, device_id, module_id)
@@ -395,19 +390,19 @@ class TestIsInputTopic(object):
         "topic, device_id, module_id",
         [
             pytest.param(
-                "devices/fake%3Fdevice/modules/fake%24module/inputs/",
+                "devices/fake%3Fdevice/modules/fake%24module/inputs/fake%23input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake%3Fdevice%2Fmodules%2Ffake%24module%2Finputs%2Ffake%23input",
                 "fake?device",
                 "fake$module",
                 id="Standard URL encoding required for ids",
             ),
             pytest.param(
-                "devices/fake%20device/modules/fake%20module/inputs/",
+                "devices/fake%20device/modules/fake%20module/inputs/fake%20input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake%20device%2Fmodules%2Ffake%20module%2Finputs%2Ffake%20input",
                 "fake device",
                 "fake module",
                 id="URL encoding for ' ' character required for ids",
             ),
             pytest.param(
-                "devices/fake%2Fdevice/modules/fake%2Fmodule/inputs/",
+                "devices/fake%2Fdevice/modules/fake%2Fmodule/inputs/fake%20input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake%2Fdevice%2Fmodules%2Ffake%2Fmodule%2Finputs%2Ffake%2Finput",
                 "fake/device",
                 "fake/module",
                 id="URL encoding for '/' character required for ids",
@@ -423,13 +418,13 @@ class TestIsInputTopic(object):
         [
             pytest.param("not a topic", "fake_device", "fake_module", id="Not a topic"),
             pytest.param(
-                "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2FdeviceBound&iothub-ack=full",
+                "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2Fdevicebound",
                 "fake_device",
                 "fake_module",
                 id="Topic of wrong type",
             ),
             pytest.param(
-                "deivces/fake_device/modules/fake_module/inputs/",
+                "deivces/fake_device/modules/fake_module/inputs/fake_input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmodules%2Ffake_module%2Finputs%2Ffake_input",
                 "fake_device",
                 "fake_module",
                 id="Malformed topic",
@@ -455,7 +450,7 @@ class TestIsInputTopic(object):
         ],
     )
     def test_is_input_topic_but_wrong_id(self, device_id, module_id):
-        topic = "devices/fake_device/modules/fake_module/inputs/"
+        topic = "devices/fake_device/modules/fake_module/inputs/fake_input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmodules%2Ffake_module%2Finputs%2Ffake_input"
         assert not mqtt_topic_iothub.is_input_topic(topic, device_id, module_id)
 
 
@@ -472,7 +467,7 @@ class TestIsMethodTopic(object):
         [
             pytest.param("not a topic", id="Not a topic"),
             pytest.param(
-                "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2FdeviceBound&iothub-ack=full",
+                "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2Fdevicebound",
                 id="Topic of wrong type",
             ),
             pytest.param("$iothub/mthds/POST/fake_method/?$rid=1", id="Malformed topic"),
@@ -525,23 +520,18 @@ class TestIsTwinDesiredPropertyPatchTopic(object):
         assert not mqtt_topic_iothub.is_twin_desired_property_patch_topic(topic)
 
 
-# NOTE: The tests in this class don't use entirely realisitic topic strings, as they do not
-# contain a message. However, this doesn't affect the tests themselves, because the implementation
-# does not look at that part. Still, perhaps it would be wise to enhance these topic strings used.
-# (Finding a realistic topic string for input messages requires setting up and debugging through
-# an Edge scenario)
 @pytest.mark.describe(".get_input_name_from_topic()")
 class TestGetInputNameFromTopic(object):
     @pytest.mark.it("Returns the input name from an input topic")
     def test_valid_input_topic(self):
-        topic = "devices/fake_device/modules/fake_module/inputs/fake_input"
+        topic = "devices/fake_device/modules/fake_module/inputs/fake_input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmodules%2Ffake_module%2Finputs%2Ffake_input"
         expected_input_name = "fake_input"
 
         assert mqtt_topic_iothub.get_input_name_from_topic(topic) == expected_input_name
 
     @pytest.mark.it("URL decodes the returned input name")
     def test_url_decodes_value(self):
-        topic = "devices/fake_device/modules/fake_module/inputs/fake%24input"
+        topic = "devices/fake_device/modules/fake_module/inputs/fake%24input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmodules%2Ffake_module%2Finputs%2Ffake%24input"
         expected_input_name = "fake$input"
         assert mqtt_topic_iothub.get_input_name_from_topic(topic) == expected_input_name
 
@@ -551,7 +541,10 @@ class TestGetInputNameFromTopic(object):
         [
             pytest.param("not a topic", id="Not a topic"),
             pytest.param("$iothub/methods/POST/fake_method/?$rid=1", id="Topic of wrong type"),
-            pytest.param("devices/fake_device/inputs/fake_input", id="Malformed topic"),
+            pytest.param(
+                "devices/fake_device/inputs/fake_input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmodules%2Ffake_module%2Finputs%2Ffake_input",
+                id="Malformed topic",
+            ),
         ],
     )
     def test_invalid_input_topic(self, topic):
@@ -694,18 +687,14 @@ class TestExtractMessagePropertiesFromTopic(object):
         [
             pytest.param(
                 "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2Fdevicebound",
-                {
-                    "mid": "6b822696-f75a-46f5-8b02-0680db65abf5",
-                    "to": "/devices/fake_device/messages/devicebound",
-                },
+                {"mid": "6b822696-f75a-46f5-8b02-0680db65abf5"},
                 {},
-                id="C2D message topic, No optional properties",
+                id="C2D message topic, Mandatory system properties",
             ),
             pytest.param(
                 "devices/fake_device/messages/devicebound/%24.exp=3237-07-19T23%3A06%3A40.0000000Z&%24.cid=fake_corid&%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2Fdevicebound&%24.ct=fake_content_type&%24.ce=utf-8",
                 {
                     "mid": "6b822696-f75a-46f5-8b02-0680db65abf5",
-                    "to": "/devices/fake_device/messages/devicebound",
                     "exp": "3237-07-19T23:06:40.0000000Z",
                     "cid": "fake_corid",
                     "ct": "fake_content_type",
@@ -716,16 +705,34 @@ class TestExtractMessagePropertiesFromTopic(object):
             ),
             pytest.param(
                 "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2Fdevicebound&custom1=value1&custom2=value2&custom3=value3",
-                {
-                    "mid": "6b822696-f75a-46f5-8b02-0680db65abf5",
-                    "to": "/devices/fake_device/messages/devicebound",
-                },
+                {"mid": "6b822696-f75a-46f5-8b02-0680db65abf5"},
                 {"custom1": "value1", "custom2": "value2", "custom3": "value3"},
                 id="C2D message topic, Custom properties",
             ),
-            # pytest.param("", {}, {}, id="Input message topic, No optional properties"),
-            # pytest.param("", {}, {}, id="Input message topic, System properties"),
-            # pytest.param("", {}, {}, id="Input message topic, Custom properties"),
+            pytest.param(
+                "devices/fake_device/modules/fake_module/inputs/fake_input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmodules%2Ffake_module%2Finputs%2Ffake_input",
+                {"mid": "6b822696-f75a-46f5-8b02-0680db65abf5"},
+                {},
+                id="Input message topic, Mandatory system properties",
+            ),
+            pytest.param(
+                "devices/fake_device/modules/fake_module/inputs/fake_input/%24.exp=3237-07-19T23%3A06%3A40.0000000Z&%24.cid=fake_corid&%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmodules%2Ffake_module%2Finputs%2Ffake_input&%24.ct=fake_content_type&%24.ce=utf-8",
+                {
+                    "mid": "6b822696-f75a-46f5-8b02-0680db65abf5",
+                    "exp": "3237-07-19T23:06:40.0000000Z",
+                    "cid": "fake_corid",
+                    "ct": "fake_content_type",
+                    "ce": "utf-8",
+                },
+                {},
+                id="Input message topic, All system properties",
+            ),
+            pytest.param(
+                "devices/fake_device/modules/fake_module/inputs/fake_input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmodules%2Ffake_module%2Finputs%2Ffake_input&custom1=value1&custom2=value2&custom3=value3",
+                {"mid": "6b822696-f75a-46f5-8b02-0680db65abf5"},
+                {"custom1": "value1", "custom2": "value2", "custom3": "value3"},
+                id="Input message topic, Custom properties",
+            ),
         ],
     )
     def test_extracts_properties(
@@ -755,7 +762,6 @@ class TestExtractMessagePropertiesFromTopic(object):
                 "devices/fake%24device/messages/devicebound/%24.exp=3237-07-19T23%3A06%3A40.0000000Z&%24.cid=fake%23corid&%24.mid=message%24id&%24.to=%2Fdevices%2Ffake%24device%2Fmessages%2Fdevicebound&%24.ct=fake%23content%24type&%24.ce=utf-%24&custom%2A=value%23&custom%26=value%24&custom%25=value%40",
                 {
                     "mid": "message$id",
-                    "to": "/devices/fake$device/messages/devicebound",
                     "exp": "3237-07-19T23:06:40.0000000Z",
                     "cid": "fake#corid",
                     "ct": "fake#content$type",
@@ -763,7 +769,19 @@ class TestExtractMessagePropertiesFromTopic(object):
                 },
                 {"custom*": "value#", "custom&": "value$", "custom%": "value@"},
                 id="C2D message topic, Standard URL decoding",
-            )
+            ),
+            pytest.param(
+                "devices/fake%24device/modules/fake%23module/inputs/fake%25input/%24.exp=3237-07-19T23%3A06%3A40.0000000Z&%24.cid=fake%23corid&%24.mid=message%24id&%24.to=%2Fdevices%2Ffake%24device%2Fmodules%2Ffake%23module%2Finputs%2Ffake%25input&%24.ct=fake%23content%24type&%24.ce=utf-%24&custom%2A=value%23&custom%26=value%24&custom%25=value%40",
+                {
+                    "mid": "message$id",
+                    "exp": "3237-07-19T23:06:40.0000000Z",
+                    "cid": "fake#corid",
+                    "ct": "fake#content$type",
+                    "ce": "utf-$",
+                },
+                {"custom*": "value#", "custom&": "value$", "custom%": "value@"},
+                id="Input message topic, Standard URL decoding",
+            ),
         ],
     )
     def test_url_decode(self, topic, expected_system_properties, expected_custom_properties):
@@ -783,21 +801,45 @@ class TestExtractMessagePropertiesFromTopic(object):
         # Validate custom properties
         assert msg.custom_properties == expected_custom_properties
 
-    @pytest.mark.it("Ignores 'iothub-ack' property in the topic, and does NOT extract it")
+    @pytest.mark.it("Ignores certain properties in a C2D message topic, and does NOT extract them")
     @pytest.mark.parametrize(
-        "topic, expected_custom_properties",
+        "topic",
         [
             pytest.param(
-                "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2Fdevicebound&iothub-ack=full",
-                {},
-                id="C2D Message Topic",
-            )
+                "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2Fdevicebound",
+                id="$.to",
+            ),
+            pytest.param(
+                "devices/fake_device/messages/devicebound/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&iothub-ack=full",
+                id="iothub-ack",
+            ),
         ],
     )
-    def test_iothub_ack(self, topic, expected_custom_properties):
+    def test_ignores_on_c2d(self, topic):
         msg = Message("fake message")
         mqtt_topic_iothub.extract_message_properties_from_topic(topic, msg)
-        assert msg.custom_properties == expected_custom_properties
+        assert msg.custom_properties == {}
+
+    @pytest.mark.it(
+        "Ignores certain properties in an input message topic, and does NOT extract them"
+    )
+    @pytest.mark.parametrize(
+        "topic",
+        [
+            pytest.param(
+                "devices/fake_device/modules/fake_module/inputs/fake_input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmodules%2Ffake_module%2Finputs%2Ffake_input",
+                id="$.to",
+            ),
+            pytest.param(
+                "devices/fake_device/modules/fake_module/inputs/fake_input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&iothub-ack=full",
+                id="iothub-ack",
+            ),
+        ],
+    )
+    def test_ignores_on_input_message(self, topic):
+        msg = Message("fake message")
+        mqtt_topic_iothub.extract_message_properties_from_topic(topic, msg)
+        assert msg.custom_properties == {}
 
     @pytest.mark.it(
         "Raises a ValueError if the provided topic is not a c2d topic or an input message topic"
@@ -814,7 +856,10 @@ class TestExtractMessagePropertiesFromTopic(object):
                 "devices/fake_device/messages/devicebnd/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmessages%2Fdevicebound",
                 id="Malformed C2D topic",
             ),
-            # pytest.param("", id="Malformed input message topic")
+            pytest.param(
+                "devices/fake_device/modules/fake_module/inutps/fake_input/%24.mid=6b822696-f75a-46f5-8b02-0680db65abf5&%24.to=%2Fdevices%2Ffake_device%2Fmodules%2Ffake_module%2Finputs%2Ffake_input",
+                id="Malformed input message topic",
+            ),
         ],
     )
     def test_bad_topic(self, topic):
