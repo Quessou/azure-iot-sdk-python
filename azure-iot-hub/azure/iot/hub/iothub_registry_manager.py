@@ -690,7 +690,7 @@ class IoTHubRegistryManager(object):
 
            correlationId - String property that contains the MessageId of the request
            messageId - Identifier for the message used for request-reply patterns.
-           userId - An ID used to specify the origin of messages
+           userId - An ID used to specify the origin of the messages
            For more information see https://docs.microsoft.com/en-us/azure/iot-hub/iot-hub-devguide-messages-construct
 
         :param str device_id: The name (Id) of the device.
